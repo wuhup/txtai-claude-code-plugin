@@ -13,8 +13,10 @@ if [[ -f "$SETUP_MARKER" ]]; then
     exit 0
 fi
 
-# Run setup
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "🔍 vault-search: First-time setup"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-exec "${PLUGIN_ROOT}/scripts/setup.sh"
+# Setup is manual to avoid automatic network installs
+echo "--------------------------------------------------------"
+echo "vault-search: setup required"
+echo "--------------------------------------------------------"
+echo "Run: ${PLUGIN_ROOT}/scripts/setup.sh"
+echo "This will download dependencies and models."
+exit 0

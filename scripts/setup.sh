@@ -12,6 +12,18 @@ SCRIPT="${PLUGIN_ROOT}/scripts/vault-search.py"
 echo ""
 
 # ─────────────────────────────────────────────────────────────
+# Step 0: Confirm network downloads
+# ─────────────────────────────────────────────────────────────
+echo "This setup will download and install dependencies and models."
+echo "Approximate download size: 500MB"
+read -p "Continue? [y/N] " -r CONFIRM
+if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+    echo "Setup cancelled."
+    exit 0
+fi
+echo ""
+
+# ─────────────────────────────────────────────────────────────
 # Step 1: Check for uv
 # ─────────────────────────────────────────────────────────────
 echo "Step 1/4: Checking for uv..."

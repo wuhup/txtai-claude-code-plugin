@@ -1,4 +1,4 @@
-# txtai-vault-search
+# txtai-claude-code-plugin
 
 A Claude Code plugin for semantic search over Obsidian vaults using [txtai](https://github.com/neuml/txtai) AI embeddings.
 
@@ -7,14 +7,18 @@ A Claude Code plugin for semantic search over Obsidian vaults using [txtai](http
 ## Installation
 
 ```bash
-claude /install github:wuhup/txtai-vault-search
+claude /install github:wuhup/txtai-claude-code-plugin
 ```
 
-On first session start, the plugin automatically:
-1. Installs [uv](https://github.com/astral-sh/uv) (if not present)
-2. Downloads embedding models (~500MB)
-3. Prompts for your vault path
-4. Builds the search index
+On first session start, the plugin checks whether setup is complete and prints
+instructions if it is not.
+
+Manual setup (required once):
+1. Run `scripts/setup.sh` from the plugin directory
+2. Installs [uv](https://github.com/astral-sh/uv) (if not present)
+3. Downloads embedding models (~500MB)
+4. Prompts for your vault path
+5. Builds the search index
 
 ## Usage
 
