@@ -46,6 +46,8 @@ vault-search index                    # Full rebuild
 # Daemon mode (faster repeated searches)
 vault-search serve                    # Start daemon
 vault-search stop                     # Stop daemon
+vault-search autostart --enable       # Auto-start on login
+vault-search autostart --disable      # Disable auto-start
 
 # Configuration
 vault-search config                   # Show current config
@@ -62,7 +64,15 @@ Combines BM25 keyword matching with semantic embeddings for best results.
 - **Reranker**: `cross-encoder/ms-marco-MiniLM-L-6-v2` (quality reranking)
 
 ### Daemon Mode
-For fast repeated searches, run `vault-search serve` to keep models in memory. Searches respond in ~100ms instead of ~5s cold start.
+Run `vault-search serve` to keep models in memory:
+- **Fast searches**: ~100ms vs ~5s cold start
+- **Auto-updates**: Index refreshes every 60s (no model reload)
+
+Enable autostart to run daemon automatically on login:
+```bash
+vault-search autostart --enable   # Start on login (launchd/systemd)
+vault-search autostart --disable  # Disable autostart
+```
 
 ## Configuration
 
@@ -80,9 +90,9 @@ Settings are stored in `~/.local/share/vault-search/config.json`
 
 ## Requirements
 
-- **Python 3.10+** (installed automatically via uv)
+- **macOS or Linux** (Windows not supported - uses Unix daemon architecture)
+- **Python 3.10+** (managed by uv)
 - **~500MB disk space** for models
-- **Works on**: Linux, macOS
 
 ## Troubleshooting
 
@@ -93,7 +103,7 @@ Run `vault-search index` to build the initial index.
 Start the daemon: `vault-search serve`
 
 ### Out of date results
-Update the index: `vault-search update`
+Daemon auto-updates every 60s. To force immediate: `vault-search update`
 
 ### Change vault path
 ```bash

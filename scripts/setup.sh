@@ -119,7 +119,7 @@ echo ""
 # ─────────────────────────────────────────────────────────────
 # Step 4: Build initial index
 # ─────────────────────────────────────────────────────────────
-echo "Step 4/4: Building search index..."
+echo "Step 4/5: Building search index..."
 
 if [[ -n "$VAULT_PATH" && -d "$VAULT_PATH" ]]; then
     uv run --script "${SCRIPT}" index
@@ -128,6 +128,26 @@ if [[ -n "$VAULT_PATH" && -d "$VAULT_PATH" ]]; then
 else
     echo "  ⚠ Skipping index build (no vault configured)"
     echo "  Run 'vault-search index' after setting vault path"
+fi
+
+echo ""
+
+# ─────────────────────────────────────────────────────────────
+# Step 5: Optional autostart
+# ─────────────────────────────────────────────────────────────
+echo "Step 5/5: Daemon autostart (optional)..."
+echo ""
+echo "  The daemon keeps models in memory for fast searches (~100ms vs ~5s)"
+echo "  and auto-updates the index every 60 seconds."
+echo ""
+read -p "  Enable daemon autostart on login? [Y/n] " -r AUTOSTART
+
+if [[ -z "$AUTOSTART" || "$AUTOSTART" =~ ^[Yy] ]]; then
+    uv run --script "${SCRIPT}" autostart --enable
+    echo ""
+else
+    echo "  Skipping autostart. You can enable later with:"
+    echo "    vault-search autostart --enable"
 fi
 
 echo ""
@@ -142,7 +162,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "✓ vault-search setup complete!"
 echo ""
 echo "Usage:"
-echo "  vault-search search \"your query\"  Search the vault"
-echo "  vault-search serve                Start daemon for faster searches"
-echo "  vault-search update               Update index after vault changes"
+echo "  vs \"your query\"                   Search the vault"
+echo "  vault-search update               Force index update"
+echo "  vault-search autostart --disable  Disable autostart"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
