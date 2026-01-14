@@ -91,7 +91,7 @@ Settings are stored in `~/.local/share/vault-search/config.json`
 ## Requirements
 
 - **macOS or Linux** (Windows not supported - uses Unix daemon architecture)
-- **Python 3.10+** (managed by uv)
+- **Python 3.10–3.12** (managed by uv)
 - **~500MB disk space** for models
 
 ## Troubleshooting
