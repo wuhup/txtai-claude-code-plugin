@@ -243,13 +243,19 @@ def build_index(incremental: bool = False, embeddings=None):
         print(f"Error: {msg}", file=sys.stderr)
         if embeddings is not None:
             # Called from daemon - don't exit, return error
-            return None
+            return {"error": msg}
         sys.exit(1)
     if not vault_root.exists():
         msg = f"Vault path does not exist: {vault_root}"
         print(f"Error: {msg}", file=sys.stderr)
         if embeddings is not None:
-            return None
+            return {"error": msg}
+        sys.exit(1)
+    if not vault_root.is_dir():
+        msg = f"Vault path is not a directory: {vault_root}"
+        print(f"Error: {msg}", file=sys.stderr)
+        if embeddings is not None:
+            return {"error": msg}
         sys.exit(1)
 
     print(f"{'Updating' if incremental else 'Building'} index for: {vault_root}")
@@ -489,7 +495,13 @@ def start_daemon():
             elif req.get("cmd") == "update":
                 # Manual update request
                 result = build_index(incremental=True, embeddings=embeddings)
-                response = {"status": "ok", **result}
+                if result and "error" not in result:
+                    response = {"status": "ok", **result}
+                else:
+                    response = {
+                        "status": "error",
+                        "error": (result or {}).get("error", "update failed"),
+                    }
             else:
                 response = {"error": "unknown command"}
 
@@ -781,9 +793,21 @@ def main():
         if daemon_running():
             print("Updating via daemon...")
             result = update_via_daemon()
-            if result:
+            if result and result.get("status") == "ok":
                 print(f"  {result.get('changed', 0)} changed, {result.get('deleted', 0)} deleted")
             else:
+                if result and result.get("error") == "unknown command":
+                    print("  Daemon is outdated, restarting...")
+                    stop_daemon()
+                    try:
+                        start_daemon()
+                    except SystemExit:
+                        pass
+                    if daemon_running():
+                        result = update_via_daemon()
+                        if result and result.get("status") == "ok":
+                            print(f"  {result.get('changed', 0)} changed, {result.get('deleted', 0)} deleted")
+                            return
                 print("  Daemon update failed, falling back to direct update")
                 build_index(incremental=True)
         else:
