@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.10,<3.13"
 # dependencies = [
-#     "txtai[pipeline]",
+#     "txtai",
 #     "sentence-transformers",
 # ]
 # ///
@@ -39,6 +39,10 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+# Work around OpenMP runtime conflicts on macOS.
+if platform.system() == "Darwin":
+    os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 # ─────────────────────────────────────────────────────────────
 # Configuration

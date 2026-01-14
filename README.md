@@ -105,6 +105,11 @@ Start the daemon: `vault-search serve`
 ### Out of date results
 Daemon auto-updates every 60s. To force immediate: `vault-search update`
 
+### OpenMP error on macOS
+If you see `OMP: Error #15: Initializing libomp.dylib`, the plugin sets
+`KMP_DUPLICATE_LIB_OK=TRUE` by default to avoid crashes. You can override this
+by setting the variable explicitly in your environment.
+
 ### Change vault path
 ```bash
 vault-search config --vault /new/path
