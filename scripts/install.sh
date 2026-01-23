@@ -73,14 +73,14 @@ if [[ -z "$VAULT_PATH" ]]; then
 
     if [[ -n "$DETECTED" ]]; then
         echo "  Detected: $DETECTED"
-        read -p "  Use this path? [Y/n] " -r USE_DETECTED
-        if [[ -z "$USE_DETECTED" || "$USE_DETECTED" =~ ^[Yy] ]]; then
+        read -p "  Use this path? [y/N] " -r USE_DETECTED </dev/tty
+        if [[ "$USE_DETECTED" =~ ^[Yy]$ ]]; then
             VAULT_PATH="$DETECTED"
         fi
     fi
 
     if [[ -z "$VAULT_PATH" ]]; then
-        read -p "  Enter path to your documents: " -r VAULT_PATH
+        read -p "  Enter path to your documents: " -r VAULT_PATH </dev/tty
     fi
 fi
 
