@@ -4,6 +4,7 @@
 # dependencies = [
 #     "txtai",
 #     "sentence-transformers",
+#     "httpx",
 # ]
 # ///
 """
@@ -356,7 +357,9 @@ def do_search(query: str, limit: int, rerank: bool, embeddings, reranker, min_sc
 
     if rerank and len(results) > 1 and reranker:
         texts = [r.get("text", "")[:1000] if isinstance(r, dict) else "" for r in results]
-        scores = reranker(query, texts)
+        raw_scores = reranker(query, texts)
+        # CrossEncoder returns [(index, score), ...] tuples - extract score (second element)
+        scores = [s[1] if isinstance(s, (tuple, list)) else s for s in raw_scores]
         ranked = sorted(zip(results, scores), key=lambda x: x[1], reverse=True)
         results = [r for r, s in ranked[:limit]]
         # Update scores with reranker scores

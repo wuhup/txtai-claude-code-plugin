@@ -172,49 +172,25 @@ echo ""
 # Step 4: AI Integrations (optional)
 # ─────────────────────────────────────────────────────────────
 echo "Step 4/7: AI integrations (optional)..."
+echo "  These will be installed to your vault: ${VAULT_PATH}"
 echo ""
 
 # Claude Code integration
 read -p "  Install Claude Code skill? [y/N] " -r INSTALL_CLAUDE
 if [[ "$INSTALL_CLAUDE" =~ ^[Yy]$ ]]; then
-    # Check if we're in a git repo that might want the plugin
-    TARGET_DIR=""
-    if [[ -d "${REPO_ROOT}/.git" ]]; then
-        TARGET_DIR="${REPO_ROOT}"
-    elif [[ -d "$(pwd)/.git" ]]; then
-        TARGET_DIR="$(pwd)"
-    fi
-
-    if [[ -n "$TARGET_DIR" ]]; then
-        PLUGIN_DIR="${TARGET_DIR}/.claude-plugin"
-        SKILLS_DIR="${PLUGIN_DIR}/skills/vault-search"
-        mkdir -p "${SKILLS_DIR}"
-        cp "${REPO_ROOT}/integrations/claude/plugin.json" "${PLUGIN_DIR}/plugin.json"
-        cp "${REPO_ROOT}/integrations/claude/SKILL.md" "${SKILLS_DIR}/SKILL.md"
-        echo "  ✓ Claude skill installed to ${PLUGIN_DIR}"
-    else
-        echo "  ⚠ Not in a git repository. Claude skill not installed."
-        echo "    To install manually, copy integrations/claude/ to your project's .claude-plugin/"
-    fi
+    PLUGIN_DIR="${VAULT_PATH}/.claude-plugin"
+    SKILLS_DIR="${PLUGIN_DIR}/skills/vault-search"
+    mkdir -p "${SKILLS_DIR}"
+    cp "${REPO_ROOT}/integrations/claude/plugin.json" "${PLUGIN_DIR}/plugin.json"
+    cp "${REPO_ROOT}/integrations/claude/SKILL.md" "${SKILLS_DIR}/SKILL.md"
+    echo "  ✓ Claude skill installed to ${PLUGIN_DIR}"
 fi
 
 # Codex integration
 read -p "  Install OpenAI Codex AGENTS.md? [y/N] " -r INSTALL_CODEX
 if [[ "$INSTALL_CODEX" =~ ^[Yy]$ ]]; then
-    TARGET_DIR=""
-    if [[ -d "${REPO_ROOT}/.git" ]]; then
-        TARGET_DIR="${REPO_ROOT}"
-    elif [[ -d "$(pwd)/.git" ]]; then
-        TARGET_DIR="$(pwd)"
-    fi
-
-    if [[ -n "$TARGET_DIR" ]]; then
-        cp "${REPO_ROOT}/integrations/codex/AGENTS.md" "${TARGET_DIR}/AGENTS.md"
-        echo "  ✓ AGENTS.md installed to ${TARGET_DIR}"
-    else
-        echo "  ⚠ Not in a git repository. AGENTS.md not installed."
-        echo "    To install manually, copy integrations/codex/AGENTS.md to your project root"
-    fi
+    cp "${REPO_ROOT}/integrations/codex/AGENTS.md" "${VAULT_PATH}/AGENTS.md"
+    echo "  ✓ AGENTS.md installed to ${VAULT_PATH}"
 fi
 echo ""
 
