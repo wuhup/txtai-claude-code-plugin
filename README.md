@@ -33,7 +33,7 @@ The setup wizard will:
 ### One-Line Install
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/wuhup/vault-search/main/scripts/setup.sh | bash -s -- /path/to/docs
+curl -sSL https://raw.githubusercontent.com/wuhup/vault-search/main/scripts/setup.sh | bash
 ```
 
 ## Usage

@@ -7,7 +7,6 @@
 
 set -e
 
-VAULT_PATH="${1:-}"
 DATA_DIR="${HOME}/.local/share/vault-search"
 BIN_DIR="${HOME}/.local/bin"
 VS_SCRIPT="${DATA_DIR}/vs.py"
@@ -49,46 +48,14 @@ echo ""
 # ─────────────────────────────────────────────────────────────
 echo "Step 2/5: Configuring document path..."
 
-if [[ -z "$VAULT_PATH" ]]; then
-    # Try to auto-detect
-    for candidate in \
-        "${HOME}/vault" \
-        "${HOME}/Vault" \
-        "${HOME}/obsidian" \
-        "${HOME}/Obsidian" \
-        "${HOME}/notes" \
-        "${HOME}/Notes" \
-        "${HOME}/Documents/vault" \
-        "${HOME}/Documents/notes" \
-        ; do
-        if [[ -d "$candidate" ]]; then
-            DETECTED="$candidate"
-            break
-        fi
-    done
-
-    if [[ -n "$DETECTED" ]]; then
-        echo "  Detected: $DETECTED"
-        printf "  Use this path? [y/N] "
-        read -r USE_DETECTED </dev/tty
-        if [[ "$USE_DETECTED" =~ ^[Yy]$ ]]; then
-            VAULT_PATH="$DETECTED"
-        fi
-    fi
-
-    if [[ -z "$VAULT_PATH" ]]; then
-        printf "  Enter path to your documents: "
-        read -r VAULT_PATH </dev/tty
-    fi
-fi
+printf "  Enter path to your documents: "
+read -r VAULT_PATH </dev/tty
 
 # Expand tilde
 VAULT_PATH="${VAULT_PATH/#\~/$HOME}"
 
 if [[ -z "$VAULT_PATH" || ! -d "$VAULT_PATH" ]]; then
     echo "  ✗ Invalid path: $VAULT_PATH"
-    echo ""
-    echo "  Usage: curl -sSL <url>/setup.sh | bash -s -- /path/to/docs"
     exit 1
 fi
 
