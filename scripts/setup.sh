@@ -1,15 +1,41 @@
 #!/bin/bash
 # Setup for vs (vault search)
 # Usage:
-#   ./setup.sh                           Interactive setup
-#   ./setup.sh /path/to/docs             With path argument
-#   curl -sSL <url>/setup.sh | bash -s -- /path/to/docs   Remote install
+#   ./setup.sh              Install
+#   ./setup.sh --uninstall  Uninstall
+#   curl -sSL <url>/setup.sh | bash
 
 set -e
 
 DATA_DIR="${HOME}/.local/share/vault-search"
 BIN_DIR="${HOME}/.local/bin"
 VS_SCRIPT="${DATA_DIR}/vs.py"
+
+# Handle --uninstall
+if [[ "${1:-}" == "--uninstall" ]]; then
+    echo ""
+    echo "Uninstalling vs..."
+
+    # Stop daemon if running
+    if [[ -f "${DATA_DIR}/.vault-search.pid" ]]; then
+        PID=$(cat "${DATA_DIR}/.vault-search.pid" 2>/dev/null || true)
+        if [[ -n "$PID" ]] && kill -0 "$PID" 2>/dev/null; then
+            kill "$PID" 2>/dev/null || true
+            echo "  ✓ Stopped daemon"
+        fi
+    fi
+
+    # Remove files
+    rm -f "${BIN_DIR}/vs"
+    echo "  ✓ Removed ${BIN_DIR}/vs"
+
+    rm -rf "${DATA_DIR}"
+    echo "  ✓ Removed ${DATA_DIR}"
+
+    echo ""
+    echo "Uninstall complete."
+    exit 0
+fi
 
 # Detect if running from local clone or remote
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || SCRIPT_DIR=""
