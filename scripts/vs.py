@@ -480,7 +480,7 @@ def get_daemon_pid() -> int | None:
 
 
 def start_daemon():
-    """Start the search daemon."""
+    """Start the search daemon using subprocess (avoids fork+torch issues on macOS)."""
     if daemon_running():
         print("Daemon already running")
         return
@@ -500,33 +500,43 @@ def start_daemon():
         print("Another process is starting the daemon")
         return
 
-    # Fork to background
-    pid = os.fork()
-    if pid > 0:
-        # Parent: wait briefly then confirm, release lock
-        time.sleep(2)
-        fcntl.flock(lock_fd, fcntl.LOCK_UN)
-        os.close(lock_fd)
-        if daemon_running():
-            print(f"Daemon started (PID {pid})")
-        else:
-            print("Daemon failed to start")
-        return
-
-    # Child: become daemon
-    os.setsid()
-
-    # Redirect stdout/stderr to log file (secure permissions)
+    # Spawn daemon as a separate process (not fork - avoids torch/macOS issues)
     log_file = DATA_DIR / "daemon.log"
-    fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-    sys.stdout = os.fdopen(fd, "a")
-    sys.stderr = sys.stdout
+    log_fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+
+    # Use the same script path that's currently running
+    script_path = Path(__file__).resolve()
+    proc = subprocess.Popen(
+        ["uv", "run", "--script", str(script_path), "_daemon"],
+        stdout=log_fd,
+        stderr=log_fd,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,  # Detach from terminal
+    )
+    os.close(log_fd)
+
+    # Wait for daemon to start
+    time.sleep(2)
+    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    os.close(lock_fd)
+
+    if daemon_running():
+        pid = get_daemon_pid()
+        print(f"Daemon started (PID {pid})")
+    else:
+        print("Daemon failed to start - check daemon.log")
+
+
+def run_daemon():
+    """Run the daemon process (called via _daemon subcommand)."""
+    embeddings_path = INDEX_DIR / "embeddings"
 
     # Write PID
     ensure_secure_dir(DATA_DIR)
     PID_FILE.write_text(str(os.getpid()))
 
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Daemon starting...")
+    sys.stdout.flush()
 
     # Load models
     embeddings = create_embeddings()
@@ -534,6 +544,7 @@ def start_daemon():
     reranker = create_reranker()
 
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Models loaded, starting socket server...")
+    sys.stdout.flush()
 
     # Create socket with secure permissions (owner-only access)
     SOCKET_PATH.unlink(missing_ok=True)
@@ -553,6 +564,7 @@ def start_daemon():
     signal.signal(signal.SIGINT, cleanup)
 
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Daemon ready, listening on {SOCKET_PATH}")
+    sys.stdout.flush()
 
     # Auto-update settings
     UPDATE_INTERVAL = 60  # seconds between update checks
@@ -615,11 +627,14 @@ def start_daemon():
                     result = build_index(incremental=True, embeddings=embeddings, quiet=True)
                     if result and (result["changed"] > 0 or result["deleted"] > 0):
                         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Auto-update: {result['changed']} changed, {result['deleted']} deleted")
+                        sys.stdout.flush()
                 except Exception as e:
                     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Auto-update error: {e}")
+                    sys.stdout.flush()
             continue
         except Exception as e:
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Error: {e}")
+            sys.stdout.flush()
         finally:
             if conn:
                 try:
@@ -962,7 +977,7 @@ def disable_autostart():
 # ─────────────────────────────────────────────────────────────
 
 # Known subcommands for default search detection
-SUBCOMMANDS = {"index", "update", "serve", "stop", "status", "autostart", "search", "config"}
+SUBCOMMANDS = {"index", "update", "serve", "stop", "status", "autostart", "search", "config", "_daemon"}
 
 
 def main():
@@ -996,6 +1011,7 @@ def main():
     # Daemon commands
     subparsers.add_parser("serve", help="Start daemon (keeps models in memory)")
     subparsers.add_parser("stop", help="Stop daemon")
+    subparsers.add_parser("_daemon", help=argparse.SUPPRESS)  # Internal: actual daemon process
 
     # Status command
     subparsers.add_parser("status", help="Show index statistics and daemon state")
@@ -1063,6 +1079,8 @@ def main():
             build_index(incremental=True)
     elif args.command == "serve":
         start_daemon()
+    elif args.command == "_daemon":
+        run_daemon()
     elif args.command == "stop":
         stop_daemon()
     elif args.command == "status":
