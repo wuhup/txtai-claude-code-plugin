@@ -1,0 +1,22 @@
+{
+  "name": "vault-search",
+  "version": "2.0.0",
+  "description": "Semantic search over document vaults using txtai AI embeddings. Find notes by meaning, not just keywords.",
+  "author": {
+    "name": "wuhup",
+    "url": "https://github.com/wuhup"
+  },
+  "homepage": "https://github.com/wuhup/vault-search",
+  "repository": "https://github.com/wuhup/vault-search",
+  "license": "MIT",
+  "keywords": [
+    "vault",
+    "semantic-search",
+    "txtai",
+    "embeddings",
+    "ai",
+    "note-taking",
+    "obsidian"
+  ],
+  "skills": "./"
+}

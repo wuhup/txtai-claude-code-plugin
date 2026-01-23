@@ -7,17 +7,21 @@
 # ]
 # ///
 """
-Semantic search over an Obsidian vault using txtai.
+vs - Lightweight semantic search over document vaults.
 
 Usage:
-    vault-search search "query"       Search the vault
-    vault-search search "query" -n 10 Return top 10 results
-    vault-search serve                Start daemon (keeps models in memory)
-    vault-search stop                 Stop daemon
-    vault-search index                Build/rebuild the search index
-    vault-search update               Update index with new/changed files
-    vault-search config               Show current configuration
-    vault-search config --vault PATH  Set vault path
+    vs "query"                      Search (default action)
+    vs "query" --json               JSON output
+    vs "query" --files              Paths only
+    vs "query" --fast               Skip reranking (~5x faster)
+    vs "query" --min-score 0.5      Filter low-relevance results
+    vs index                        Build/rebuild the search index
+    vs update                       Update index with new/changed files
+    vs serve                        Start daemon (keeps models in memory)
+    vs stop                         Stop daemon
+    vs status                       Show index statistics and daemon state
+    vs config                       Show current configuration
+    vs config --vault PATH          Set vault path
 
 Environment:
     VAULT_SEARCH_PATH    Path to vault (overrides config file)
@@ -38,6 +42,7 @@ import stat
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 # Work around OpenMP runtime conflicts on macOS.
@@ -121,7 +126,7 @@ def require_vault_path() -> Path:
     vault = get_vault_path()
     if not vault:
         print("Error: Vault path not configured.", file=sys.stderr)
-        print("  Set with: vault-search config --vault /path/to/vault", file=sys.stderr)
+        print("  Set with: vs config --vault /path/to/vault", file=sys.stderr)
         print("  Or set VAULT_SEARCH_PATH environment variable", file=sys.stderr)
         sys.exit(1)
     if not vault.exists():
@@ -192,12 +197,13 @@ def save_file_metadata(metadata: dict):
     METADATA_FILE.write_text(json.dumps(metadata))
 
 
-def extract_document(filepath: Path, vault_root: Path) -> dict | None:
+def extract_document(filepath: Path, vault_root: Path, quiet: bool = False) -> dict | None:
     """Extract document data for indexing."""
     try:
         content = filepath.read_text(encoding="utf-8")
     except Exception as e:
-        print(f"  Warning: Could not read {filepath}: {e}", file=sys.stderr)
+        if not quiet:
+            print(f"  Warning: Could not read {filepath}: {e}", file=sys.stderr)
         return None
 
     rel_path = filepath.relative_to(vault_root)
@@ -231,12 +237,13 @@ def create_reranker():
     return CrossEncoder(RERANKER_MODEL)
 
 
-def build_index(incremental: bool = False, embeddings=None):
+def build_index(incremental: bool = False, embeddings=None, quiet: bool = False):
     """Build or update the search index.
 
     Args:
         incremental: If True, only re-index changed files
         embeddings: Pre-loaded embeddings instance (from daemon). If None, loads fresh.
+        quiet: If True, suppress progress output
 
     Returns:
         dict with 'changed' and 'deleted' counts, or None on error
@@ -244,29 +251,34 @@ def build_index(incremental: bool = False, embeddings=None):
     vault_root = get_vault_path()
     if not vault_root:
         msg = "Vault path not configured"
-        print(f"Error: {msg}", file=sys.stderr)
+        if not quiet:
+            print(f"Error: {msg}", file=sys.stderr)
         if embeddings is not None:
             # Called from daemon - don't exit, return error
             return {"error": msg}
         sys.exit(1)
     if not vault_root.exists():
         msg = f"Vault path does not exist: {vault_root}"
-        print(f"Error: {msg}", file=sys.stderr)
+        if not quiet:
+            print(f"Error: {msg}", file=sys.stderr)
         if embeddings is not None:
             return {"error": msg}
         sys.exit(1)
     if not vault_root.is_dir():
         msg = f"Vault path is not a directory: {vault_root}"
-        print(f"Error: {msg}", file=sys.stderr)
+        if not quiet:
+            print(f"Error: {msg}", file=sys.stderr)
         if embeddings is not None:
             return {"error": msg}
         sys.exit(1)
 
-    print(f"{'Updating' if incremental else 'Building'} index for: {vault_root}")
+    if not quiet:
+        print(f"{'Updating' if incremental else 'Building'} index for: {vault_root}")
     start = time.time()
 
     md_files = get_markdown_files(vault_root)
-    print(f"  Found {len(md_files)} markdown files")
+    if not quiet:
+        print(f"  Found {len(md_files)} markdown files")
 
     old_metadata = load_file_metadata() if incremental else {}
     new_metadata = {}
@@ -282,7 +294,7 @@ def build_index(incremental: bool = False, embeddings=None):
             new_metadata[file_key] = old_metadata[file_key]
             continue
 
-        doc = extract_document(filepath, vault_root)
+        doc = extract_document(filepath, vault_root, quiet=quiet)
         if doc:
             documents.append(doc)
             new_metadata[file_key] = get_file_metadata(filepath)
@@ -291,10 +303,12 @@ def build_index(incremental: bool = False, embeddings=None):
     deleted = set(old_metadata.keys()) - current_files if incremental else set()
 
     if incremental and not documents and not deleted:
-        print("  No changes detected, index is up to date")
+        if not quiet:
+            print("  No changes detected, index is up to date")
         return {"changed": 0, "deleted": 0}
 
-    print(f"  Indexing {len(documents)} changed, {len(deleted)} deleted")
+    if not quiet:
+        print(f"  Indexing {len(documents)} changed, {len(deleted)} deleted")
 
     # Use provided embeddings or load fresh
     embeddings_provided = embeddings is not None
@@ -321,8 +335,9 @@ def build_index(incremental: bool = False, embeddings=None):
     save_file_metadata(new_metadata)
 
     elapsed = time.time() - start
-    print(f"  Done in {elapsed:.1f}s")
-    print(f"  Index saved to {INDEX_DIR}")
+    if not quiet:
+        print(f"  Done in {elapsed:.1f}s")
+        print(f"  Index saved to {INDEX_DIR}")
 
     return {"changed": len(documents), "deleted": len(deleted)}
 
@@ -331,7 +346,7 @@ def build_index(incremental: bool = False, embeddings=None):
 # Search
 # ─────────────────────────────────────────────────────────────
 
-def do_search(query: str, limit: int, rerank: bool, embeddings, reranker) -> list:
+def do_search(query: str, limit: int, rerank: bool, embeddings, reranker, min_score: float | None = None) -> list:
     """Perform search with pre-loaded models."""
     search_limit = limit * 2 if rerank else limit
     results = embeddings.search(query, limit=search_limit)
@@ -343,15 +358,68 @@ def do_search(query: str, limit: int, rerank: bool, embeddings, reranker) -> lis
         texts = [r.get("text", "")[:1000] if isinstance(r, dict) else "" for r in results]
         scores = reranker(query, texts)
         ranked = sorted(zip(results, scores), key=lambda x: x[1], reverse=True)
-        results = [r for r, _ in ranked[:limit]]
+        results = [r for r, s in ranked[:limit]]
+        # Update scores with reranker scores
+        for i, (r, s) in enumerate(ranked[:limit]):
+            if isinstance(r, dict):
+                r["score"] = float(s)
     else:
         results = results[:limit]
+
+    # Apply min_score filter
+    if min_score is not None:
+        results = [r for r in results if (r.get("score", 0) if isinstance(r, dict) else 0) >= min_score]
 
     return results
 
 
-def format_results(query: str, results: list) -> str:
-    """Format search results for display."""
+def format_results_json(query: str, results: list) -> str:
+    """Format search results as JSON."""
+    formatted = []
+    for i, result in enumerate(results, 1):
+        if isinstance(result, dict):
+            path = result.get("path", result.get("id", "unknown"))
+            title = result.get("title", Path(path).stem)
+            score = result.get("score", 0)
+            text = result.get("text", "")
+        else:
+            path = result[0] if len(result) > 0 else "unknown"
+            score = result[1] if len(result) > 1 else 0
+            title = Path(path).stem
+            text = ""
+
+        snippet = text[:200].replace("\n", " ").strip() if text else ""
+        if len(text) > 200:
+            snippet += "..."
+
+        formatted.append({
+            "rank": i,
+            "path": path,
+            "title": title,
+            "score": round(score, 4),
+            "snippet": snippet
+        })
+
+    return json.dumps({
+        "query": query,
+        "count": len(formatted),
+        "results": formatted
+    }, indent=2)
+
+
+def format_results_files(results: list) -> str:
+    """Format search results as file paths only."""
+    paths = []
+    for result in results:
+        if isinstance(result, dict):
+            paths.append(result.get("path", result.get("id", "unknown")))
+        else:
+            paths.append(result[0] if len(result) > 0 else "unknown")
+    return "\n".join(paths)
+
+
+def format_results_console(query: str, results: list) -> str:
+    """Format search results for console display."""
     lines = [f"\n{'─' * 60}", f"Results for: {query}", f"{'─' * 60}\n"]
 
     for i, result in enumerate(results, 1):
@@ -398,6 +466,16 @@ def daemon_running() -> bool:
         return False
 
 
+def get_daemon_pid() -> int | None:
+    """Get daemon PID if running."""
+    if not daemon_running():
+        return None
+    try:
+        return int(PID_FILE.read_text().strip())
+    except (ValueError, FileNotFoundError):
+        return None
+
+
 def start_daemon():
     """Start the search daemon."""
     if daemon_running():
@@ -406,7 +484,7 @@ def start_daemon():
 
     embeddings_path = INDEX_DIR / "embeddings"
     if not embeddings_path.exists():
-        print("Error: Index not found. Run 'vault-search index' first.", file=sys.stderr)
+        print("Error: Index not found. Run 'vs index' first.", file=sys.stderr)
         sys.exit(1)
 
     # Acquire exclusive lock to prevent race condition on startup
@@ -491,14 +569,29 @@ def start_daemon():
                     req.get("limit", 5),
                     req.get("rerank", True),
                     embeddings,
-                    reranker
+                    reranker,
+                    req.get("min_score")
                 )
                 response = {"results": results}
             elif req.get("cmd") == "ping":
                 response = {"status": "ok"}
+            elif req.get("cmd") == "status":
+                # Return index statistics
+                vault = get_vault_path()
+                metadata = load_file_metadata()
+                last_modified = None
+                if METADATA_FILE.exists():
+                    last_modified = datetime.fromtimestamp(
+                        METADATA_FILE.stat().st_mtime
+                    ).isoformat()
+                response = {
+                    "documents": len(metadata),
+                    "vault": str(vault) if vault else None,
+                    "last_update": last_modified
+                }
             elif req.get("cmd") == "update":
                 # Manual update request
-                result = build_index(incremental=True, embeddings=embeddings)
+                result = build_index(incremental=True, embeddings=embeddings, quiet=True)
                 if result and "error" not in result:
                     response = {"status": "ok", **result}
                 else:
@@ -516,7 +609,7 @@ def start_daemon():
             if now - last_update >= UPDATE_INTERVAL:
                 last_update = now
                 try:
-                    result = build_index(incremental=True, embeddings=embeddings)
+                    result = build_index(incremental=True, embeddings=embeddings, quiet=True)
                     if result and (result["changed"] > 0 or result["deleted"] > 0):
                         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Auto-update: {result['changed']} changed, {result['deleted']} deleted")
                 except Exception as e:
@@ -546,17 +639,26 @@ def stop_daemon():
     print("Daemon stopped")
 
 
-def query_daemon(query: str, limit: int, rerank: bool) -> list:
+def query_daemon(query: str, limit: int, rerank: bool, min_score: float | None = None, verbose: bool = False) -> list:
     """Send query to daemon."""
+    if verbose:
+        print(f"[DEBUG] Socket: {SOCKET_PATH}", file=sys.stderr)
+
+    start = time.time()
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(30.0)  # Prevent indefinite hang if daemon crashes
     sock.connect(str(SOCKET_PATH))
-    sock.send(json.dumps({
+
+    request = {
         "cmd": "search",
         "query": query,
         "limit": limit,
         "rerank": rerank
-    }).encode())
+    }
+    if min_score is not None:
+        request["min_score"] = min_score
+
+    sock.send(json.dumps(request).encode())
     # Receive all data (responses can exceed 64KB buffer)
     chunks = []
     while True:
@@ -566,7 +668,33 @@ def query_daemon(query: str, limit: int, rerank: bool) -> list:
         chunks.append(chunk)
     sock.close()
     data = b"".join(chunks).decode()
-    return json.loads(data).get("results", [])
+    results = json.loads(data).get("results", [])
+
+    if verbose:
+        elapsed = time.time() - start
+        print(f"[DEBUG] Search took {elapsed:.3f}s", file=sys.stderr)
+        print(f"[DEBUG] Returned {len(results)} results", file=sys.stderr)
+
+    return results
+
+
+def status_via_daemon() -> dict | None:
+    """Get status from daemon."""
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(5.0)
+        sock.connect(str(SOCKET_PATH))
+        sock.send(json.dumps({"cmd": "status"}).encode())
+        chunks = []
+        while True:
+            chunk = sock.recv(65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        sock.close()
+        return json.loads(b"".join(chunks).decode())
+    except Exception:
+        return None
 
 
 def update_via_daemon() -> dict | None:
@@ -588,28 +716,97 @@ def update_via_daemon() -> dict | None:
         return None
 
 
-def search(query: str, limit: int = 5, rerank: bool = True):
+def search(query: str, limit: int = 5, rerank: bool = True, min_score: float | None = None,
+           output_json: bool = False, output_files: bool = False, quiet: bool = False, verbose: bool = False):
     """Search the vault, using daemon if available."""
     embeddings_path = INDEX_DIR / "embeddings"
     if not embeddings_path.exists():
-        print("Error: Index not found. Run 'vault-search index' first.", file=sys.stderr)
+        if not quiet:
+            print("Error: Index not found. Run 'vs index' first.", file=sys.stderr)
         sys.exit(1)
+
+    results = None
 
     # Try daemon first
     if daemon_running():
         try:
-            results = query_daemon(query, limit, rerank)
-            print(format_results(query, results))
-            return
-        except Exception:
+            results = query_daemon(query, limit, rerank, min_score, verbose)
+        except Exception as e:
+            if verbose:
+                print(f"[DEBUG] Daemon query failed: {e}", file=sys.stderr)
             pass  # Fall back to direct
 
     # Direct search (slow but works without daemon)
-    embeddings = create_embeddings()
-    embeddings.load(str(embeddings_path))
-    reranker = create_reranker() if rerank else None
-    results = do_search(query, limit, rerank, embeddings, reranker)
-    print(format_results(query, results))
+    if results is None:
+        if verbose:
+            print("[DEBUG] Using direct search (daemon not available)", file=sys.stderr)
+            start = time.time()
+
+        embeddings = create_embeddings()
+        embeddings.load(str(embeddings_path))
+        reranker = create_reranker() if rerank else None
+        results = do_search(query, limit, rerank, embeddings, reranker, min_score)
+
+        if verbose:
+            elapsed = time.time() - start
+            print(f"[DEBUG] Direct search took {elapsed:.3f}s", file=sys.stderr)
+
+    # Format output
+    if output_json:
+        print(format_results_json(query, results))
+    elif output_files:
+        print(format_results_files(results))
+    else:
+        print(format_results_console(query, results))
+
+
+# ─────────────────────────────────────────────────────────────
+# Status command
+# ─────────────────────────────────────────────────────────────
+
+def show_status():
+    """Show index statistics and daemon state."""
+    vault = get_vault_path()
+
+    # Get document count from metadata
+    metadata = load_file_metadata()
+    doc_count = len(metadata)
+
+    # Get index size
+    index_size = 0
+    embeddings_path = INDEX_DIR / "embeddings"
+    if embeddings_path.exists():
+        for f in embeddings_path.rglob("*"):
+            if f.is_file():
+                index_size += f.stat().st_size
+
+    # Get last update time
+    last_update = None
+    if METADATA_FILE.exists():
+        mtime = METADATA_FILE.stat().st_mtime
+        last_update = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Daemon status
+    daemon_status = "running" if daemon_running() else "stopped"
+    daemon_pid = get_daemon_pid()
+
+    # Format size
+    def format_size(size_bytes):
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        elif size_bytes < 1024 * 1024:
+            return f"{size_bytes / 1024:.1f} KB"
+        else:
+            return f"{size_bytes / (1024 * 1024):.1f} MB"
+
+    print(f"Vault: {vault or '(not configured)'}")
+    print(f"Documents: {doc_count:,}")
+    print(f"Index size: {format_size(index_size)}")
+    print(f"Last updated: {last_update or '(never)'}")
+    if daemon_pid:
+        print(f"Daemon: {daemon_status} (pid {daemon_pid})")
+    else:
+        print(f"Daemon: {daemon_status}")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -672,7 +869,12 @@ def autostart_enabled() -> bool:
 
 def enable_autostart():
     """Enable daemon autostart on login."""
-    script_path = str(Path(__file__).resolve())
+    # Use the installed script location
+    script_path = str(DATA_DIR / "vs.py")
+
+    # Fall back to current script if not installed
+    if not Path(script_path).exists():
+        script_path = str(Path(__file__).resolve())
 
     if _is_macos():
         # macOS: launchd plist
@@ -756,13 +958,33 @@ def disable_autostart():
 # Main
 # ─────────────────────────────────────────────────────────────
 
+# Known subcommands for default search detection
+SUBCOMMANDS = {"index", "update", "serve", "stop", "status", "autostart", "search", "config"}
+
+
 def main():
+    # Preprocess args: if first non-flag arg isn't a subcommand, treat as search query
+    # This enables `vs "query"` as shorthand for `vs search "query"`
+    args_to_parse = sys.argv[1:]
+    if args_to_parse:
+        # Find first non-flag argument
+        first_positional = None
+        for i, arg in enumerate(args_to_parse):
+            if not arg.startswith("-"):
+                first_positional = arg
+                first_positional_idx = i
+                break
+
+        # If first positional isn't a subcommand, insert "search"
+        if first_positional and first_positional not in SUBCOMMANDS:
+            args_to_parse.insert(first_positional_idx, "search")
+
     parser = argparse.ArgumentParser(
-        description="Semantic search over an Obsidian vault",
+        description="Lightweight semantic search over document vaults",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(dest="command")
 
     # Index commands
     subparsers.add_parser("index", help="Build/rebuild the full search index")
@@ -772,25 +994,45 @@ def main():
     subparsers.add_parser("serve", help="Start daemon (keeps models in memory)")
     subparsers.add_parser("stop", help="Stop daemon")
 
+    # Status command
+    subparsers.add_parser("status", help="Show index statistics and daemon state")
+
     # Autostart command
     autostart_parser = subparsers.add_parser("autostart", help="Enable/disable daemon autostart on login")
     autostart_group = autostart_parser.add_mutually_exclusive_group(required=True)
     autostart_group.add_argument("--enable", action="store_true", help="Enable autostart")
     autostart_group.add_argument("--disable", action="store_true", help="Disable autostart")
 
-    # Search command
+    # Search command (both explicit `vs search "query"` and implicit `vs "query"`)
     search_parser = subparsers.add_parser("search", help="Search the vault")
     search_parser.add_argument("query", help="Search query")
     search_parser.add_argument("-n", "--limit", type=int, default=5, help="Number of results")
-    search_parser.add_argument("--no-rerank", action="store_true", help="Disable reranking")
+    search_parser.add_argument("--json", action="store_true", help="JSON output")
+    search_parser.add_argument("--files", action="store_true", help="Paths only, one per line")
+    search_parser.add_argument("--min-score", type=float, help="Minimum relevance score (0.0-1.0)")
+    search_parser.add_argument("--fast", action="store_true", help="Skip reranking (~5x faster)")
+    search_parser.add_argument("-q", "--quiet", action="store_true", help="Suppress warnings")
+    search_parser.add_argument("-v", "--verbose", action="store_true", help="Debug output")
 
     # Config command
     config_parser = subparsers.add_parser("config", help="Show or set configuration")
     config_parser.add_argument("--vault", metavar="PATH", help="Set vault path")
 
-    args = parser.parse_args()
+    args = parser.parse_args(args_to_parse)
 
-    if args.command == "index":
+    # Handle search command (both explicit and implicit)
+    if args.command == "search":
+        search(
+            args.query,
+            limit=args.limit,
+            rerank=not args.fast,
+            min_score=args.min_score,
+            output_json=args.json,
+            output_files=args.files,
+            quiet=args.quiet,
+            verbose=args.verbose
+        )
+    elif args.command == "index":
         build_index(incremental=False)
     elif args.command == "update":
         # Use daemon if running (fast, no model reload)
@@ -820,8 +1062,8 @@ def main():
         start_daemon()
     elif args.command == "stop":
         stop_daemon()
-    elif args.command == "search":
-        search(args.query, limit=args.limit, rerank=not args.no_rerank)
+    elif args.command == "status":
+        show_status()
     elif args.command == "config":
         if args.vault:
             set_vault_path(args.vault)
@@ -832,6 +1074,8 @@ def main():
             enable_autostart()
         else:
             disable_autostart()
+    else:
+        parser.print_help()
 
 
 if __name__ == "__main__":

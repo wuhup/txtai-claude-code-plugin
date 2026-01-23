@@ -2,3 +2,13 @@
 __pycache__/
 .python-version
 .env
+
+# Claude Code local settings
+.claude/
+
+# Installed AI integrations (created by setup.sh in project directories)
+# The source templates are in integrations/, not at root
+.claude-plugin/
+
+# Codex config
+.codex-config.toml
