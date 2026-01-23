@@ -14,7 +14,21 @@ A universal command-line tool for semantic search over document vaults using [tx
 
 ## Installation
 
-### Interactive Setup (Recommended)
+### One-Line Install
+
+```bash
+curl -sSL https://raw.githubusercontent.com/wuhup/vault-search/main/scripts/setup.sh | bash
+```
+
+The setup wizard will:
+1. Install [uv](https://github.com/astral-sh/uv) if needed
+2. Configure your document path
+3. Install `vs` to `~/.local/bin`
+4. Optionally install AI integrations (Claude, Codex)
+5. Download models (~500MB) and build index
+6. Enable autostart with auto-restart on failure
+
+### From Cloned Repo
 
 ```bash
 git clone https://github.com/wuhup/vault-search
@@ -22,18 +36,24 @@ cd vault-search
 ./scripts/setup.sh
 ```
 
-The setup wizard will:
-1. Configure your document path
-2. Install `vs` to `~/.local/bin`
-3. Optionally install AI integrations (Claude, Codex)
-4. Download models (~500MB)
-5. Build your search index
-6. Start the daemon and verify
+### Updating
 
-### One-Line Install
+Run setup again to update:
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/wuhup/vault-search/main/scripts/setup.sh | bash
+```
+
+If an existing installation is detected, you'll be offered:
+- **Update** - updates vs.py, runs incremental index update, keeps existing config
+- **Reinstall** - fresh install from scratch
+
+### Uninstall
+
+```bash
+curl -sSL https://raw.githubusercontent.com/wuhup/vault-search/main/scripts/setup.sh | bash -s -- --uninstall
+# or from cloned repo:
+./scripts/setup.sh --uninstall
 ```
 
 ## Usage
@@ -98,16 +118,15 @@ vs autostart --disable          # Disable auto-start
 
 ## AI Integrations (Optional)
 
-The `vs` command works standalone, but you can install optional AI integrations:
+The `vs` command works standalone, but you can install optional AI integrations during setup (works with both curl and cloned repo installs).
 
 ### Claude Code
 
-During setup, answer "y" to "Install Claude Code skill?" or manually:
-
-```bash
-mkdir -p .claude-plugin/skills/vault-search
-cp integrations/claude/plugin.json .claude-plugin/
-cp integrations/claude/SKILL.md .claude-plugin/skills/vault-search/
+Answer "y" to "Install Claude Code skill?" during setup. This installs to your vault:
+```
+your-vault/.claude-plugin/
+├── plugin.json
+└── skills/vault-search/SKILL.md
 ```
 
 Then Claude can search your vault when you ask:
@@ -116,11 +135,7 @@ Then Claude can search your vault when you ask:
 
 ### OpenAI Codex
 
-During setup, answer "y" to "Install OpenAI Codex AGENTS.md?" or manually:
-
-```bash
-cp integrations/codex/AGENTS.md ./AGENTS.md
-```
+Answer "y" to "Install OpenAI Codex AGENTS.md?" during setup. This installs `AGENTS.md` to your vault root.
 
 ## How It Works
 
@@ -132,9 +147,10 @@ Combines BM25 keyword matching with semantic embeddings for best results.
 - **Reranker**: `cross-encoder/ms-marco-MiniLM-L-6-v2` (quality reranking)
 
 ### Daemon Mode
-Run `vs serve` to keep models in memory:
+Setup automatically enables the daemon with auto-restart:
 - **Fast searches**: ~100ms vs ~5s cold start
 - **Auto-updates**: Index refreshes every 60s
+- **Auto-restart**: Daemon restarts on crash or reboot
 
 ## Configuration
 
@@ -152,7 +168,11 @@ Settings stored in `~/.local/share/vault-search/config.json`
 ├── vs.py              # Installed script
 ├── config.json        # Configuration
 ├── index/             # Search index
-└── daemon.log         # Daemon logs
+└── launchd.log        # Daemon logs (macOS)
+
+# Autostart config (created by setup)
+~/Library/LaunchAgents/com.vault-search.daemon.plist  # macOS
+~/.config/systemd/user/vault-search.service           # Linux
 ```
 
 ## Requirements
