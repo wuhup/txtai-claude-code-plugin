@@ -924,8 +924,9 @@ def enable_autostart():
 '''
         LAUNCHD_PLIST.write_text(plist_content)
         subprocess.run(["launchctl", "load", str(LAUNCHD_PLIST)], capture_output=True)
+        subprocess.run(["launchctl", "start", "com.vault-search.daemon"], capture_output=True)
         print("Autostart enabled (launchd)")
-        print("  Daemon will start on next login, or run: launchctl start com.vault-search.daemon")
+        print("  Daemon started and will start on login")
 
     else:
         # Linux: systemd user service

@@ -10,13 +10,32 @@ set -e
 DATA_DIR="${HOME}/.local/share/vault-search"
 BIN_DIR="${HOME}/.local/bin"
 VS_SCRIPT="${DATA_DIR}/vs.py"
+ORIGINAL_PATH="$PATH"
 
 # Handle --uninstall
 if [[ "${1:-}" == "--uninstall" ]]; then
     echo ""
     echo "Uninstalling vs..."
 
-    # Stop daemon if running
+    # Disable autostart first (before removing files)
+    LAUNCHD_PLIST="${HOME}/Library/LaunchAgents/com.vault-search.daemon.plist"
+    SYSTEMD_SERVICE="${HOME}/.config/systemd/user/vault-search.service"
+
+    if [[ -f "$LAUNCHD_PLIST" ]]; then
+        launchctl unload "$LAUNCHD_PLIST" 2>/dev/null || true
+        rm -f "$LAUNCHD_PLIST"
+        echo "  ✓ Disabled autostart (launchd)"
+    fi
+
+    if [[ -f "$SYSTEMD_SERVICE" ]]; then
+        systemctl --user stop vault-search.service 2>/dev/null || true
+        systemctl --user disable vault-search.service 2>/dev/null || true
+        rm -f "$SYSTEMD_SERVICE"
+        systemctl --user daemon-reload 2>/dev/null || true
+        echo "  ✓ Disabled autostart (systemd)"
+    fi
+
+    # Stop daemon if still running
     if [[ -f "${DATA_DIR}/.vault-search.pid" ]]; then
         PID=$(cat "${DATA_DIR}/.vault-search.pid" 2>/dev/null || true)
         if [[ -n "$PID" ]] && kill -0 "$PID" 2>/dev/null; then
@@ -124,8 +143,8 @@ echo "  ✓ Installed to ${BIN_DIR}/vs"
 # Add to PATH for this session
 export PATH="${BIN_DIR}:${PATH}"
 
-# PATH warning
-if [[ ":$PATH:" != *":${BIN_DIR}:"* ]]; then
+# PATH warning (check original PATH, not modified one)
+if [[ ":$ORIGINAL_PATH:" != *":${BIN_DIR}:"* ]]; then
     echo ""
     echo "  ⚠ Add to your shell profile:"
     echo "    export PATH=\"\$HOME/.local/bin:\$PATH\""
@@ -158,8 +177,33 @@ if [[ -d "${LOCAL_REPO}/integrations" ]]; then
     fi
     echo ""
 else
-    echo "Step 4/5: AI integrations..."
-    echo "  (skipped - run from cloned repo for AI integrations)"
+    echo "Step 4/5: AI integrations (optional)..."
+    echo ""
+
+    printf "  Install Claude Code skill? [y/N] "
+    read -r INSTALL_CLAUDE </dev/tty
+    if [[ "$INSTALL_CLAUDE" =~ ^[Yy]$ ]]; then
+        PLUGIN_DIR="${VAULT_PATH}/.claude-plugin"
+        SKILLS_DIR="${PLUGIN_DIR}/skills/vault-search"
+        mkdir -p "${SKILLS_DIR}"
+        if curl -sSLf "${REPO_URL}/integrations/claude/plugin.json" -o "${PLUGIN_DIR}/plugin.json" && \
+           curl -sSLf "${REPO_URL}/integrations/claude/SKILL.md" -o "${SKILLS_DIR}/SKILL.md"; then
+            echo "  ✓ Claude skill installed"
+        else
+            echo "  ✗ Failed to download Claude skill files"
+            rm -rf "${PLUGIN_DIR}"
+        fi
+    fi
+
+    printf "  Install OpenAI Codex AGENTS.md? [y/N] "
+    read -r INSTALL_CODEX </dev/tty
+    if [[ "$INSTALL_CODEX" =~ ^[Yy]$ ]]; then
+        if curl -sSLf "${REPO_URL}/integrations/codex/AGENTS.md" -o "${VAULT_PATH}/AGENTS.md"; then
+            echo "  ✓ AGENTS.md installed"
+        else
+            echo "  ✗ Failed to download AGENTS.md"
+        fi
+    fi
     echo ""
 fi
 
@@ -174,7 +218,8 @@ uv run --script "${VS_SCRIPT}" index
 
 echo ""
 
-uv run --script "${VS_SCRIPT}" serve
+# Enable autostart (includes auto-restart on failure)
+uv run --script "${VS_SCRIPT}" autostart --enable
 sleep 2
 
 # Verify
@@ -195,5 +240,5 @@ echo "  vs \"your query\"          Search documents"
 echo "  vs \"query\" --json        JSON output"
 echo "  vs status                Show index stats"
 echo ""
-echo "For autostart: vs autostart --enable"
+echo "To disable autostart: vs autostart --disable"
 echo ""
