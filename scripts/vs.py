@@ -184,6 +184,9 @@ def load_file_metadata() -> dict:
     if METADATA_FILE.exists():
         try:
             data = json.loads(METADATA_FILE.read_text())
+            # Must be a dict, not array or other JSON types
+            if not isinstance(data, dict):
+                return {}
             # Handle legacy hash-only format: migrate to new format
             if data and isinstance(next(iter(data.values()), None), str):
                 return {}  # Force re-index on format change
@@ -576,8 +579,22 @@ def run_daemon():
         conn = None
         try:
             conn, _ = sock.accept()
-            data = conn.recv(4096).decode()
-            req = json.loads(data)
+            # Read all data (handle messages larger than buffer)
+            chunks = []
+            req = None
+            while True:
+                chunk = conn.recv(4096)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                # Try to parse - complete JSON means we're done
+                try:
+                    req = json.loads(b"".join(chunks).decode())
+                    break
+                except json.JSONDecodeError:
+                    continue  # Need more data
+            if req is None:
+                continue  # Connection closed without valid JSON
 
             if req.get("cmd") == "search":
                 results = do_search(
@@ -626,8 +643,10 @@ def run_daemon():
                 last_update = now
                 try:
                     result = build_index(incremental=True, embeddings=embeddings, quiet=True)
-                    if result and (result["changed"] > 0 or result["deleted"] > 0):
-                        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Auto-update: {result['changed']} changed, {result['deleted']} deleted")
+                    changed = result.get("changed", 0) if result else 0
+                    deleted = result.get("deleted", 0) if result else 0
+                    if changed > 0 or deleted > 0:
+                        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Auto-update: {changed} changed, {deleted} deleted")
                         sys.stdout.flush()
                 except Exception as e:
                     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Auto-update error: {e}")
@@ -651,6 +670,26 @@ def stop_daemon():
         return
 
     pid = int(PID_FILE.read_text().strip())
+
+    # Validate this is actually our daemon process before killing
+    try:
+        # Check if process command line contains our script
+        if platform.system() == "Darwin":
+            result = subprocess.run(["ps", "-p", str(pid), "-o", "command="],
+                                    capture_output=True, text=True)
+        else:
+            result = subprocess.run(["ps", "-p", str(pid), "-o", "cmd="],
+                                    capture_output=True, text=True)
+
+        cmd = result.stdout.strip()
+        if "vs.py" not in cmd and "vault-search" not in cmd:
+            print(f"PID {pid} is not a vault-search daemon (stale PID file)")
+            PID_FILE.unlink(missing_ok=True)
+            return
+    except Exception:
+        # If we can't verify, assume PID file is stale if process doesn't exist
+        pass
+
     os.kill(pid, signal.SIGTERM)
     time.sleep(0.5)
     PID_FILE.unlink(missing_ok=True)
@@ -923,10 +962,19 @@ def enable_autostart():
 </plist>
 '''
         LAUNCHD_PLIST.write_text(plist_content)
-        subprocess.run(["launchctl", "load", str(LAUNCHD_PLIST)], capture_output=True)
-        subprocess.run(["launchctl", "start", "com.vault-search.daemon"], capture_output=True)
-        print("Autostart enabled (launchd)")
-        print("  Daemon started and will start on login")
+        load_result = subprocess.run(["launchctl", "load", str(LAUNCHD_PLIST)], capture_output=True)
+        start_result = subprocess.run(["launchctl", "start", "com.vault-search.daemon"], capture_output=True)
+
+        if load_result.returncode != 0:
+            print(f"Autostart failed: launchctl load returned {load_result.returncode}")
+            if load_result.stderr:
+                print(f"  {load_result.stderr.decode().strip()}")
+        elif start_result.returncode != 0:
+            print("Autostart enabled (launchd)")
+            print(f"  Warning: daemon failed to start (will start on login)")
+        else:
+            print("Autostart enabled (launchd)")
+            print("  Daemon started and will start on login")
 
     else:
         # Linux: systemd user service
@@ -948,10 +996,19 @@ WantedBy=default.target
 '''
         SYSTEMD_SERVICE.write_text(service_content)
         subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
-        subprocess.run(["systemctl", "--user", "enable", "vault-search.service"], capture_output=True)
-        subprocess.run(["systemctl", "--user", "start", "vault-search.service"], capture_output=True)
-        print("Autostart enabled (systemd)")
-        print("  Daemon started and will start on login")
+        enable_result = subprocess.run(["systemctl", "--user", "enable", "vault-search.service"], capture_output=True)
+        start_result = subprocess.run(["systemctl", "--user", "start", "vault-search.service"], capture_output=True)
+
+        if enable_result.returncode != 0:
+            print(f"Autostart failed: systemctl enable returned {enable_result.returncode}")
+            if enable_result.stderr:
+                print(f"  {enable_result.stderr.decode().strip()}")
+        elif start_result.returncode != 0:
+            print("Autostart enabled (systemd)")
+            print(f"  Warning: daemon failed to start (will start on login)")
+        else:
+            print("Autostart enabled (systemd)")
+            print("  Daemon started and will start on login")
 
 
 def disable_autostart():

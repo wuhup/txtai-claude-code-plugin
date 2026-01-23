@@ -135,8 +135,8 @@ exec uv run --script "$HOME/.local/share/vault-search/vs.py" "$@"
 WRAPPER
 chmod +x "${BIN_DIR}/vs"
 
-# Save config
-echo "{\"vault_path\": \"${VAULT_PATH}\"}" > "${DATA_DIR}/config.json"
+# Save config (use Python for proper JSON escaping of special characters)
+VAULT_PATH="$VAULT_PATH" python3 -c "import json, os; print(json.dumps({'vault_path': os.environ['VAULT_PATH']}))" > "${DATA_DIR}/config.json"
 
 echo "  ✓ Installed to ${BIN_DIR}/vs"
 
