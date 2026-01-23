@@ -1,14 +1,41 @@
 #!/bin/bash
-# Interactive setup wizard for vs (vault search)
-# Installs the vs command, configures vault path, and optionally sets up AI integrations
+# Setup for vs (vault search)
+# Usage:
+#   ./setup.sh                           Interactive setup
+#   ./setup.sh /path/to/docs             With path argument
+#   curl -sSL <url>/setup.sh | bash -s -- /path/to/docs   Remote install
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+VAULT_PATH="${1:-}"
 DATA_DIR="${HOME}/.local/share/vault-search"
 BIN_DIR="${HOME}/.local/bin"
-SETUP_MARKER="${DATA_DIR}/.setup-complete-v2"
+VS_SCRIPT="${DATA_DIR}/vs.py"
+
+# Detect if running from local clone or remote
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || SCRIPT_DIR=""
+LOCAL_VS_PY="${SCRIPT_DIR}/vs.py"
+LOCAL_REPO="${SCRIPT_DIR}/.."
+REPO_URL="https://raw.githubusercontent.com/wuhup/vault-search/main"
+
+# Detect interactive mode
+INTERACTIVE=false
+if [[ -t 0 ]]; then
+    INTERACTIVE=true
+fi
+
+# Helper to read input (works when piped via /dev/tty)
+ask() {
+    local prompt="$1"
+    local var="$2"
+    local default="$3"
+
+    if [[ "$INTERACTIVE" == "true" ]]; then
+        read -p "$prompt" -r "$var"
+    else
+        read -p "$prompt" -r "$var" </dev/tty 2>/dev/null || eval "$var='$default'"
+    fi
+}
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -17,246 +44,168 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 # ─────────────────────────────────────────────────────────────
-# Step 0: Confirm network downloads
-# ─────────────────────────────────────────────────────────────
-echo "This setup will:"
-echo "  1. Configure your document path"
-echo "  2. Install the 'vs' command to ~/.local/bin"
-echo "  3. Optionally install AI integrations (Claude, Codex)"
-echo "  4. Download embedding models (~500MB)"
-echo "  5. Build your search index"
-echo ""
-read -p "Continue? [Y/n] " -r CONFIRM
-if [[ "$CONFIRM" =~ ^[Nn]$ ]]; then
-    echo "Setup cancelled."
-    exit 0
-fi
-echo ""
-
-# ─────────────────────────────────────────────────────────────
 # Step 1: Check for uv
 # ─────────────────────────────────────────────────────────────
-echo "Step 1/7: Checking for uv..."
+echo "Step 1/5: Checking for uv..."
 
 if command -v uv &>/dev/null; then
-    echo "  ✓ uv is installed ($(uv --version))"
+    echo "  ✓ uv is installed"
 else
-    echo "  ⚠ uv not found. Installing..."
+    echo "  Installing uv..."
     curl -LsSf https://astral.sh/uv/install.sh | sh
-
-    # Add to path for this session
     export PATH="${HOME}/.local/bin:${PATH}"
 
-    if command -v uv &>/dev/null; then
-        echo "  ✓ uv installed successfully"
-    else
-        echo "  ✗ Failed to install uv. Please install manually:"
-        echo "    curl -LsSf https://astral.sh/uv/install.sh | sh"
+    if ! command -v uv &>/dev/null; then
+        echo "  ✗ Failed to install uv"
         exit 1
     fi
+    echo "  ✓ uv installed"
 fi
 echo ""
 
 # ─────────────────────────────────────────────────────────────
 # Step 2: Configure document path
 # ─────────────────────────────────────────────────────────────
-echo "Step 2/7: Configure document path..."
-
-# Check if already configured
-EXISTING_VAULT=""
-if [[ -f "${DATA_DIR}/config.json" ]]; then
-    EXISTING_VAULT=$(cat "${DATA_DIR}/config.json" 2>/dev/null | grep -o '"vault_path"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*: *"//' | sed 's/"$//' || true)
-fi
-
-if [[ -n "$EXISTING_VAULT" && -d "$EXISTING_VAULT" ]]; then
-    echo "  Existing configuration found: ${EXISTING_VAULT}"
-    read -p "  Keep this path? [Y/n] " -r KEEP_PATH
-    if [[ ! "$KEEP_PATH" =~ ^[Nn]$ ]]; then
-        VAULT_PATH="$EXISTING_VAULT"
-    fi
-fi
+echo "Step 2/5: Configuring document path..."
 
 if [[ -z "$VAULT_PATH" ]]; then
-    # Try to auto-detect common vault locations
-    DETECTED=""
+    # Try to auto-detect
     for candidate in \
         "${HOME}/vault" \
         "${HOME}/Vault" \
         "${HOME}/obsidian" \
         "${HOME}/Obsidian" \
-        "${HOME}/Documents/vault" \
-        "${HOME}/Documents/Vault" \
-        "${HOME}/Documents/Obsidian" \
         "${HOME}/notes" \
         "${HOME}/Notes" \
+        "${HOME}/Documents/vault" \
         "${HOME}/Documents/notes" \
-        "${HOME}/Documents/Notes" \
         ; do
         if [[ -d "$candidate" ]]; then
-            # Prefer directories with .obsidian (Obsidian vaults)
-            if [[ -d "${candidate}/.obsidian" ]]; then
-                DETECTED="$candidate"
-                break
-            elif [[ -z "$DETECTED" ]]; then
-                DETECTED="$candidate"
-            fi
+            DETECTED="$candidate"
+            break
         fi
     done
 
     if [[ -n "$DETECTED" ]]; then
-        echo "  Detected document folder at: ${DETECTED}"
-        if [[ -d "${DETECTED}/.obsidian" ]]; then
-            echo "  (Obsidian vault detected)"
-        fi
-        echo ""
-        read -p "  Use this path? [Y/n] " -r USE_DETECTED
-        if [[ -z "$USE_DETECTED" || "$USE_DETECTED" =~ ^[Yy] ]]; then
+        echo "  Detected: $DETECTED"
+        ask "  Use this path? [y/N] " USE_DETECTED ""
+        if [[ "$USE_DETECTED" =~ ^[Yy]$ ]]; then
             VAULT_PATH="$DETECTED"
         fi
     fi
 
     if [[ -z "$VAULT_PATH" ]]; then
-        echo ""
-        read -p "  Enter path to your documents/vault: " -r VAULT_PATH
-    fi
-
-    if [[ -z "$VAULT_PATH" ]]; then
-        echo "  ✗ No document path provided. Setup cannot continue."
-        exit 1
-    fi
-
-    # Safe tilde expansion (no eval to prevent command injection)
-    VAULT_PATH="${VAULT_PATH/#\~/$HOME}"
-
-    if [[ ! -d "$VAULT_PATH" ]]; then
-        echo "  ✗ Path does not exist: $VAULT_PATH"
-        exit 1
+        ask "  Enter path to your documents: " VAULT_PATH ""
     fi
 fi
 
-echo "  ✓ Document path: ${VAULT_PATH}"
+# Expand tilde
+VAULT_PATH="${VAULT_PATH/#\~/$HOME}"
+
+if [[ -z "$VAULT_PATH" || ! -d "$VAULT_PATH" ]]; then
+    echo "  ✗ Invalid path: $VAULT_PATH"
+    echo ""
+    echo "  Usage: curl -sSL <url>/setup.sh | bash -s -- /path/to/docs"
+    exit 1
+fi
+
+echo "  ✓ Document path: $VAULT_PATH"
 echo ""
 
 # ─────────────────────────────────────────────────────────────
-# Step 3: Install vs command
+# Step 3: Install vs
 # ─────────────────────────────────────────────────────────────
-echo "Step 3/7: Installing vs command..."
+echo "Step 3/5: Installing vs..."
 
-# Create directories
 mkdir -p "${DATA_DIR}"
 mkdir -p "${BIN_DIR}"
 
-# Copy vs.py to data directory
-cp "${SCRIPT_DIR}/vs.py" "${DATA_DIR}/vs.py"
-chmod +x "${DATA_DIR}/vs.py"
+# Get vs.py from local clone or download
+if [[ -f "${LOCAL_VS_PY}" ]]; then
+    cp "${LOCAL_VS_PY}" "${VS_SCRIPT}"
+    echo "  (from local clone)"
+else
+    echo "  Downloading from GitHub..."
+    if ! curl -sSLf "${REPO_URL}/scripts/vs.py" -o "${VS_SCRIPT}"; then
+        echo "  ✗ Failed to download vs.py"
+        exit 1
+    fi
+fi
+chmod +x "${VS_SCRIPT}"
 
-# Create shell wrapper
+# Create wrapper
 cat > "${BIN_DIR}/vs" << 'WRAPPER'
 #!/usr/bin/env bash
 exec uv run --script "$HOME/.local/share/vault-search/vs.py" "$@"
 WRAPPER
 chmod +x "${BIN_DIR}/vs"
 
-echo "  ✓ Installed vs to ${BIN_DIR}/vs"
+# Save config
+echo "{\"vault_path\": \"${VAULT_PATH}\"}" > "${DATA_DIR}/config.json"
 
-# Check if ~/.local/bin is in PATH
+echo "  ✓ Installed to ${BIN_DIR}/vs"
+
+# Add to PATH for this session
+export PATH="${BIN_DIR}:${PATH}"
+
+# PATH warning
 if [[ ":$PATH:" != *":${BIN_DIR}:"* ]]; then
     echo ""
-    echo "  ⚠ ${BIN_DIR} is not in your PATH"
-    echo "  Add this to your ~/.bashrc or ~/.zshrc:"
+    echo "  ⚠ Add to your shell profile:"
     echo "    export PATH=\"\$HOME/.local/bin:\$PATH\""
 fi
 echo ""
 
 # ─────────────────────────────────────────────────────────────
-# Step 4: AI Integrations (optional)
+# Step 4: AI Integrations (interactive only)
 # ─────────────────────────────────────────────────────────────
-echo "Step 4/7: AI integrations (optional)..."
-echo "  These will be installed to your vault: ${VAULT_PATH}"
-echo ""
+if [[ "$INTERACTIVE" == "true" && -d "${LOCAL_REPO}/integrations" ]]; then
+    echo "Step 4/5: AI integrations (optional)..."
+    echo ""
 
-# Claude Code integration
-read -p "  Install Claude Code skill? [y/N] " -r INSTALL_CLAUDE
-if [[ "$INSTALL_CLAUDE" =~ ^[Yy]$ ]]; then
-    PLUGIN_DIR="${VAULT_PATH}/.claude-plugin"
-    SKILLS_DIR="${PLUGIN_DIR}/skills/vault-search"
-    mkdir -p "${SKILLS_DIR}"
-    cp "${REPO_ROOT}/integrations/claude/plugin.json" "${PLUGIN_DIR}/plugin.json"
-    cp "${REPO_ROOT}/integrations/claude/SKILL.md" "${SKILLS_DIR}/SKILL.md"
-    echo "  ✓ Claude skill installed to ${PLUGIN_DIR}"
+    ask "  Install Claude Code skill? [y/N] " INSTALL_CLAUDE ""
+    if [[ "$INSTALL_CLAUDE" =~ ^[Yy]$ ]]; then
+        PLUGIN_DIR="${VAULT_PATH}/.claude-plugin"
+        SKILLS_DIR="${PLUGIN_DIR}/skills/vault-search"
+        mkdir -p "${SKILLS_DIR}"
+        cp "${LOCAL_REPO}/integrations/claude/plugin.json" "${PLUGIN_DIR}/plugin.json"
+        cp "${LOCAL_REPO}/integrations/claude/SKILL.md" "${SKILLS_DIR}/SKILL.md"
+        echo "  ✓ Claude skill installed"
+    fi
+
+    ask "  Install OpenAI Codex AGENTS.md? [y/N] " INSTALL_CODEX ""
+    if [[ "$INSTALL_CODEX" =~ ^[Yy]$ ]]; then
+        cp "${LOCAL_REPO}/integrations/codex/AGENTS.md" "${VAULT_PATH}/AGENTS.md"
+        echo "  ✓ AGENTS.md installed"
+    fi
+    echo ""
+else
+    echo "Step 4/5: AI integrations..."
+    echo "  (skipped - run from cloned repo for AI integrations)"
+    echo ""
 fi
 
-# Codex integration
-read -p "  Install OpenAI Codex AGENTS.md? [y/N] " -r INSTALL_CODEX
-if [[ "$INSTALL_CODEX" =~ ^[Yy]$ ]]; then
-    cp "${REPO_ROOT}/integrations/codex/AGENTS.md" "${VAULT_PATH}/AGENTS.md"
-    echo "  ✓ AGENTS.md installed to ${VAULT_PATH}"
-fi
-echo ""
-
 # ─────────────────────────────────────────────────────────────
-# Step 5: Download models
+# Step 5: Build index and start daemon
 # ─────────────────────────────────────────────────────────────
-echo "Step 5/7: Downloading embedding models..."
-echo "  This may take a few minutes (~500MB)"
+echo "Step 5/5: Building index and starting daemon..."
+echo "  This may take several minutes (~500MB models + indexing)"
 echo ""
 
-# Save vault path to config first
-mkdir -p "${DATA_DIR}"
-echo "{\"vault_path\": \"${VAULT_PATH}\"}" > "${DATA_DIR}/config.json"
-
-# Running config will trigger model download
-uv run --script "${DATA_DIR}/vs.py" config >/dev/null 2>&1 || true
-
-echo "  ✓ Models downloaded"
-echo ""
-
-# ─────────────────────────────────────────────────────────────
-# Step 6: Build initial index
-# ─────────────────────────────────────────────────────────────
-echo "Step 6/7: Building search index..."
-echo ""
-
-uv run --script "${DATA_DIR}/vs.py" index
+uv run --script "${VS_SCRIPT}" index
 
 echo ""
-echo "  ✓ Index built"
-echo ""
 
-# ─────────────────────────────────────────────────────────────
-# Step 7: Verification and daemon setup
-# ─────────────────────────────────────────────────────────────
-echo "Step 7/7: Verification and daemon setup..."
-echo ""
-
-# Start daemon
-echo "  Starting daemon..."
-uv run --script "${DATA_DIR}/vs.py" serve
-
-# Wait for daemon to be ready
+uv run --script "${VS_SCRIPT}" serve
 sleep 2
 
-# Run test query
-echo "  Running test query..."
-TEST_OUTPUT=$(uv run --script "${DATA_DIR}/vs.py" "test" --json 2>/dev/null || echo '{"error": "failed"}')
-
+# Verify
+TEST_OUTPUT=$(uv run --script "${VS_SCRIPT}" "test" --json 2>/dev/null || echo '{"error": "failed"}')
 if echo "$TEST_OUTPUT" | grep -q '"count"'; then
-    COUNT=$(echo "$TEST_OUTPUT" | grep -o '"count"[[:space:]]*:[[:space:]]*[0-9]*' | grep -o '[0-9]*' || echo "0")
-    echo "  ✓ Test query successful (found ${COUNT} results)"
+    echo "  ✓ Verification successful"
 else
-    echo "  ⚠ Test query returned unexpected output"
-    echo "    You can verify manually with: vs \"test\" --json"
+    echo "  ⚠ Verification returned unexpected output"
 fi
-
-# Ask about autostart
-echo ""
-read -p "  Enable daemon autostart on login? [Y/n] " -r AUTOSTART
-if [[ -z "$AUTOSTART" || "$AUTOSTART" =~ ^[Yy] ]]; then
-    uv run --script "${DATA_DIR}/vs.py" autostart --enable
-fi
-
-# Mark setup complete
-touch "${SETUP_MARKER}"
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -266,9 +215,7 @@ echo ""
 echo "Usage:"
 echo "  vs \"your query\"          Search documents"
 echo "  vs \"query\" --json        JSON output"
-echo "  vs \"query\" --files       Paths only"
 echo "  vs status                Show index stats"
-echo "  vs update                Update index"
 echo ""
-echo "For more options: vs --help"
+echo "For autostart: vs autostart --enable"
 echo ""

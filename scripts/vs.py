@@ -5,6 +5,7 @@
 #     "txtai",
 #     "sentence-transformers",
 #     "httpx",
+#     "torch>=2.0,<2.11",
 # ]
 # ///
 """

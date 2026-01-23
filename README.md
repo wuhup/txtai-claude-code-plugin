@@ -30,14 +30,10 @@ The setup wizard will:
 5. Build your search index
 6. Start the daemon and verify
 
-### One-Line Install (Headless Servers)
+### One-Line Install
 
 ```bash
-# With path argument:
-curl -sSL https://raw.githubusercontent.com/wuhup/vault-search/main/scripts/install.sh | bash -s -- /path/to/docs
-
-# Interactive (will prompt for path):
-curl -sSL https://raw.githubusercontent.com/wuhup/vault-search/main/scripts/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/wuhup/vault-search/main/scripts/setup.sh | bash -s -- /path/to/docs
 ```
 
 ## Usage
@@ -191,9 +187,8 @@ vs index  # Rebuild for new vault
 ```
 vs/
 ├── scripts/
-│   ├── vs.py                    # Core tool (universal)
-│   ├── setup.sh                 # Interactive setup wizard
-│   └── install.sh               # One-line installer
+│   ├── vs.py                    # Core tool
+│   └── setup.sh                 # Setup script (interactive or curl | bash)
 │
 ├── integrations/
 │   ├── claude/
