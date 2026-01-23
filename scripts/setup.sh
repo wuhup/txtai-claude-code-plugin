@@ -18,25 +18,6 @@ LOCAL_VS_PY="${SCRIPT_DIR}/vs.py"
 LOCAL_REPO="${SCRIPT_DIR}/.."
 REPO_URL="https://raw.githubusercontent.com/wuhup/vault-search/main"
 
-# Detect interactive mode
-INTERACTIVE=false
-if [[ -t 0 ]]; then
-    INTERACTIVE=true
-fi
-
-# Helper to read input (works when piped via /dev/tty)
-ask() {
-    local prompt="$1"
-    local var="$2"
-    local default="$3"
-
-    if [[ "$INTERACTIVE" == "true" ]]; then
-        read -p "$prompt" -r "$var"
-    else
-        read -p "$prompt" -r "$var" </dev/tty 2>/dev/null || eval "$var='$default'"
-    fi
-}
-
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  vs - Lightweight Semantic Search Setup"
@@ -88,14 +69,16 @@ if [[ -z "$VAULT_PATH" ]]; then
 
     if [[ -n "$DETECTED" ]]; then
         echo "  Detected: $DETECTED"
-        ask "  Use this path? [y/N] " USE_DETECTED ""
+        printf "  Use this path? [y/N] "
+        read -r USE_DETECTED </dev/tty
         if [[ "$USE_DETECTED" =~ ^[Yy]$ ]]; then
             VAULT_PATH="$DETECTED"
         fi
     fi
 
     if [[ -z "$VAULT_PATH" ]]; then
-        ask "  Enter path to your documents: " VAULT_PATH ""
+        printf "  Enter path to your documents: "
+        read -r VAULT_PATH </dev/tty
     fi
 fi
 
@@ -159,11 +142,12 @@ echo ""
 # ─────────────────────────────────────────────────────────────
 # Step 4: AI Integrations (interactive only)
 # ─────────────────────────────────────────────────────────────
-if [[ "$INTERACTIVE" == "true" && -d "${LOCAL_REPO}/integrations" ]]; then
+if [[ -d "${LOCAL_REPO}/integrations" ]]; then
     echo "Step 4/5: AI integrations (optional)..."
     echo ""
 
-    ask "  Install Claude Code skill? [y/N] " INSTALL_CLAUDE ""
+    printf "  Install Claude Code skill? [y/N] "
+    read -r INSTALL_CLAUDE </dev/tty
     if [[ "$INSTALL_CLAUDE" =~ ^[Yy]$ ]]; then
         PLUGIN_DIR="${VAULT_PATH}/.claude-plugin"
         SKILLS_DIR="${PLUGIN_DIR}/skills/vault-search"
@@ -173,7 +157,8 @@ if [[ "$INTERACTIVE" == "true" && -d "${LOCAL_REPO}/integrations" ]]; then
         echo "  ✓ Claude skill installed"
     fi
 
-    ask "  Install OpenAI Codex AGENTS.md? [y/N] " INSTALL_CODEX ""
+    printf "  Install OpenAI Codex AGENTS.md? [y/N] "
+    read -r INSTALL_CODEX </dev/tty
     if [[ "$INSTALL_CODEX" =~ ^[Yy]$ ]]; then
         cp "${LOCAL_REPO}/integrations/codex/AGENTS.md" "${VAULT_PATH}/AGENTS.md"
         echo "  ✓ AGENTS.md installed"
