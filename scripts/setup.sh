@@ -1,9 +1,12 @@
 #!/bin/bash
 # Setup for vs (vault search)
 # Usage:
-#   ./setup.sh              Install
+#   ./setup.sh              Install (or update if already installed)
 #   ./setup.sh --uninstall  Uninstall
 #   curl -sSL <url>/setup.sh | bash
+#
+# Update mode: If an existing installation is detected, offers to update
+# vs.py and run incremental index update while preserving the existing index.
 
 set -e
 
@@ -69,6 +72,80 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 # ─────────────────────────────────────────────────────────────
+# Detect existing installation
+# ─────────────────────────────────────────────────────────────
+UPDATE_MODE=false
+EXISTING_VAULT=""
+
+if [[ -f "${DATA_DIR}/config.json" ]] && [[ -d "${DATA_DIR}/index" ]]; then
+    echo "Existing installation detected."
+    echo ""
+
+    # Get existing vault path
+    EXISTING_VAULT=$(python3 -c "import json; print(json.load(open('${DATA_DIR}/config.json')).get('vault_path', ''))" 2>/dev/null || echo "")
+
+    if [[ -n "$EXISTING_VAULT" ]]; then
+        echo "  Vault: $EXISTING_VAULT"
+    fi
+
+    # Validate index by checking if embeddings exist
+    if [[ -d "${DATA_DIR}/index/embeddings" ]]; then
+        echo "  Index: found"
+
+        # Try a test query to validate index is loadable
+        echo "  Validating index..."
+        export PATH="${BIN_DIR}:${PATH}"
+        if [[ -f "${VS_SCRIPT}" ]] && uv run --script "${VS_SCRIPT}" "test" --json >/dev/null 2>&1; then
+            echo "  Status: ✓ valid"
+            echo ""
+            echo "Options:"
+            echo "  [u] Update - update vs.py, keep index, run incremental update"
+            echo "  [r] Reinstall - fresh install, rebuild index from scratch"
+            echo "  [c] Cancel"
+            echo ""
+            printf "Choice [u/r/c]: "
+            read -r CHOICE </dev/tty
+
+            case "$CHOICE" in
+                [Uu])
+                    UPDATE_MODE=true
+                    VAULT_PATH="$EXISTING_VAULT"
+                    echo ""
+                    echo "Updating existing installation..."
+                    echo ""
+                    ;;
+                [Rr])
+                    echo ""
+                    echo "Reinstalling from scratch..."
+                    echo ""
+                    ;;
+                *)
+                    echo ""
+                    echo "Cancelled."
+                    exit 0
+                    ;;
+            esac
+        else
+            echo "  Status: ✗ index corrupted or incompatible"
+            echo ""
+            echo "Index validation failed. A fresh install is required."
+            printf "Continue with reinstall? [y/N] "
+            read -r CONFIRM </dev/tty
+            if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+                echo "Cancelled."
+                exit 0
+            fi
+            echo ""
+        fi
+    else
+        echo "  Index: not found"
+        echo ""
+        echo "Incomplete installation detected. Continuing with fresh install..."
+        echo ""
+    fi
+fi
+
+# ─────────────────────────────────────────────────────────────
 # Step 1: Check for uv
 # ─────────────────────────────────────────────────────────────
 echo "Step 1/5: Checking for uv..."
@@ -93,18 +170,22 @@ echo ""
 # ─────────────────────────────────────────────────────────────
 echo "Step 2/5: Configuring document path..."
 
-printf "  Enter path to your documents: "
-read -r VAULT_PATH </dev/tty
+if [[ "$UPDATE_MODE" == true ]]; then
+    echo "  ✓ Using existing: $VAULT_PATH"
+else
+    printf "  Enter path to your documents: "
+    read -r VAULT_PATH </dev/tty
 
-# Expand tilde
-VAULT_PATH="${VAULT_PATH/#\~/$HOME}"
+    # Expand tilde
+    VAULT_PATH="${VAULT_PATH/#\~/$HOME}"
 
-if [[ -z "$VAULT_PATH" || ! -d "$VAULT_PATH" ]]; then
-    echo "  ✗ Invalid path: $VAULT_PATH"
-    exit 1
+    if [[ -z "$VAULT_PATH" || ! -d "$VAULT_PATH" ]]; then
+        echo "  ✗ Invalid path: $VAULT_PATH"
+        exit 1
+    fi
+
+    echo "  ✓ Document path: $VAULT_PATH"
 fi
-
-echo "  ✓ Document path: $VAULT_PATH"
 echo ""
 
 # ─────────────────────────────────────────────────────────────
@@ -152,9 +233,13 @@ fi
 echo ""
 
 # ─────────────────────────────────────────────────────────────
-# Step 4: AI Integrations (interactive only)
+# Step 4: AI Integrations (skip in update mode)
 # ─────────────────────────────────────────────────────────────
-if [[ -d "${LOCAL_REPO}/integrations" ]]; then
+if [[ "$UPDATE_MODE" == true ]]; then
+    echo "Step 4/5: AI integrations..."
+    echo "  (skipped - keeping existing integrations)"
+    echo ""
+elif [[ -d "${LOCAL_REPO}/integrations" ]]; then
     echo "Step 4/5: AI integrations (optional)..."
     echo ""
 
@@ -210,17 +295,34 @@ fi
 # ─────────────────────────────────────────────────────────────
 # Step 5: Build index and start daemon
 # ─────────────────────────────────────────────────────────────
-echo "Step 5/5: Building index and starting daemon..."
-echo "  This may take several minutes (~500MB models + indexing)"
-echo ""
+if [[ "$UPDATE_MODE" == true ]]; then
+    echo "Step 5/5: Updating index and restarting daemon..."
+    echo ""
 
-uv run --script "${VS_SCRIPT}" index
+    # Stop existing daemon before update
+    uv run --script "${VS_SCRIPT}" stop 2>/dev/null || true
 
-echo ""
+    # Run incremental update
+    uv run --script "${VS_SCRIPT}" update
 
-# Enable autostart (includes auto-restart on failure)
-uv run --script "${VS_SCRIPT}" autostart --enable
-sleep 2
+    echo ""
+
+    # Restart daemon (autostart should already be enabled)
+    uv run --script "${VS_SCRIPT}" serve
+    sleep 2
+else
+    echo "Step 5/5: Building index and starting daemon..."
+    echo "  This may take several minutes (~500MB models + indexing)"
+    echo ""
+
+    uv run --script "${VS_SCRIPT}" index
+
+    echo ""
+
+    # Enable autostart (includes auto-restart on failure)
+    uv run --script "${VS_SCRIPT}" autostart --enable
+    sleep 2
+fi
 
 # Verify
 TEST_OUTPUT=$(uv run --script "${VS_SCRIPT}" "test" --json 2>/dev/null || echo '{"error": "failed"}')
@@ -232,7 +334,11 @@ fi
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  ✓ Setup complete!"
+if [[ "$UPDATE_MODE" == true ]]; then
+    echo "  ✓ Update complete!"
+else
+    echo "  ✓ Setup complete!"
+fi
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "Usage:"
