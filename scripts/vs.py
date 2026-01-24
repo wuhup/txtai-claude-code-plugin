@@ -777,25 +777,6 @@ def status_via_daemon() -> dict | None:
         return None
 
 
-def update_via_daemon() -> dict | None:
-    """Send update request to daemon. Returns result dict or None if failed."""
-    try:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(300.0)  # Updates can take a while for large vaults
-        sock.connect(str(SOCKET_PATH))
-        sock.send(json.dumps({"cmd": "update"}).encode())
-        chunks = []
-        while True:
-            chunk = sock.recv(65536)
-            if not chunk:
-                break
-            chunks.append(chunk)
-        sock.close()
-        return json.loads(b"".join(chunks).decode())
-    except Exception:
-        return None
-
-
 def search(query: str, limit: int = 5, rerank: bool = True, min_score: float | None = None,
            output_json: bool = False, output_files: bool = False, quiet: bool = False, verbose: bool = False):
     """Search the vault, using daemon if available."""
@@ -1135,29 +1116,20 @@ def main():
     elif args.command == "index":
         build_index(incremental=False)
     elif args.command == "update":
-        # Use daemon if running (fast, no model reload)
-        if daemon_running():
-            print("Updating via daemon...")
-            result = update_via_daemon()
-            if result and result.get("status") == "ok":
-                print(f"  {result.get('changed', 0)} changed, {result.get('deleted', 0)} deleted")
-            else:
-                if result and result.get("error") == "unknown command":
-                    print("  Daemon is outdated, restarting...")
-                    stop_daemon()
-                    try:
-                        start_daemon()
-                    except SystemExit:
-                        pass
-                    if daemon_running():
-                        result = update_via_daemon()
-                        if result and result.get("status") == "ok":
-                            print(f"  {result.get('changed', 0)} changed, {result.get('deleted', 0)} deleted")
-                            return
-                print("  Daemon update failed, falling back to direct update")
-                build_index(incremental=True)
-        else:
-            build_index(incremental=True)
+        # Stop daemon, update index, restart daemon
+        was_running = daemon_running()
+        if was_running:
+            print("Stopping daemon...")
+            stop_daemon()
+
+        build_index(incremental=True)
+
+        if was_running:
+            print("Restarting daemon...")
+            try:
+                start_daemon()
+            except SystemExit:
+                pass
     elif args.command == "serve":
         start_daemon()
     elif args.command == "_daemon":
