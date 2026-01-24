@@ -68,6 +68,11 @@ vs/
       vs.py                      # Installed copy of main script
       config.json                # Configuration
       index/                     # Search index
+
+# Optional AI integrations (user chooses location during setup):
+~/.claude/plugins/vault-search/  # Global - or project's .claude/plugins/
+  plugin.json
+  SKILL.md
 ```
 
 ### Search Pipeline
@@ -89,7 +94,7 @@ vs/
 - Single-file Python script using `uv run --script` with inline dependencies (no venv management)
 - Daemon uses Unix socket for fast repeated searches
 - Excludes `.git`, `.obsidian`, `.beads`, `.claude`, `node_modules`, `.trash` from indexing
-- AI integrations are optional and installed to project directories, not the repo
+- AI integrations are optional; Claude skill can be global or project-local
 
 ## Output Formats
 

@@ -19,11 +19,29 @@ ORIGINAL_PATH="$PATH"
 if [[ "${1:-}" == "--uninstall" ]]; then
     echo ""
     echo "Uninstalling vs..."
+    echo ""
 
-    # Disable autostart first (before removing files)
+    # Show what will be removed
+    echo "The following will be removed:"
+    [[ -f "${BIN_DIR}/vs" ]] && echo "  - ${BIN_DIR}/vs (command)"
+    [[ -d "${DATA_DIR}" ]] && echo "  - ${DATA_DIR}/ (data, config, index)"
+    [[ -d "${HOME}/.claude/plugins/vault-search" ]] && echo "  - ~/.claude/plugins/vault-search/ (Claude plugin)"
+
     LAUNCHD_PLIST="${HOME}/Library/LaunchAgents/com.vault-search.daemon.plist"
     SYSTEMD_SERVICE="${HOME}/.config/systemd/user/vault-search.service"
+    [[ -f "$LAUNCHD_PLIST" ]] && echo "  - launchd autostart config"
+    [[ -f "$SYSTEMD_SERVICE" ]] && echo "  - systemd autostart config"
 
+    echo ""
+    printf "Continue? [y/N] "
+    read -r CONFIRM_UNINSTALL </dev/tty
+    if [[ ! "$CONFIRM_UNINSTALL" =~ ^[Yy]$ ]]; then
+        echo "Cancelled."
+        exit 0
+    fi
+    echo ""
+
+    # Disable autostart first (before removing files)
     if [[ -f "$LAUNCHD_PLIST" ]]; then
         launchctl unload "$LAUNCHD_PLIST" 2>/dev/null || true
         rm -f "$LAUNCHD_PLIST"
@@ -54,8 +72,17 @@ if [[ "${1:-}" == "--uninstall" ]]; then
     rm -rf "${DATA_DIR}"
     echo "  ✓ Removed ${DATA_DIR}"
 
+    # Remove Claude plugin (global location)
+    if [[ -d "${HOME}/.claude/plugins/vault-search" ]]; then
+        rm -rf "${HOME}/.claude/plugins/vault-search"
+        echo "  ✓ Removed ~/.claude/plugins/vault-search"
+    fi
+
     echo ""
     echo "Uninstall complete."
+    echo ""
+    echo "Note: Project-local installations (.claude/plugins/vault-search in your vault)"
+    echo "and AGENTS.md files are not removed. Delete them manually if needed."
     exit 0
 fi
 
@@ -116,6 +143,15 @@ if [[ -f "${DATA_DIR}/config.json" ]] && [[ -d "${DATA_DIR}/index" ]]; then
                     ;;
                 [Rr])
                     echo ""
+                    echo "  ⚠ This will delete the existing index and rebuild from scratch."
+                    echo "  Rebuilding may take several minutes depending on vault size."
+                    printf "  Continue? [y/N] "
+                    read -r CONFIRM_REINSTALL </dev/tty
+                    if [[ ! "$CONFIRM_REINSTALL" =~ ^[Yy]$ ]]; then
+                        echo "Cancelled."
+                        exit 0
+                    fi
+                    echo ""
                     echo "Reinstalling from scratch..."
                     echo ""
                     ;;
@@ -153,6 +189,16 @@ echo "Step 1/5: Checking for uv..."
 if command -v uv &>/dev/null; then
     echo "  ✓ uv is installed"
 else
+    echo "  uv is required but not installed."
+    echo "  uv is a fast Python package manager from Astral (https://astral.sh/uv)"
+    printf "  Install uv now? [y/N] "
+    read -r INSTALL_UV </dev/tty
+    if [[ ! "$INSTALL_UV" =~ ^[Yy]$ ]]; then
+        echo ""
+        echo "  Install uv manually: curl -LsSf https://astral.sh/uv/install.sh | sh"
+        echo "  Then re-run this setup."
+        exit 1
+    fi
     echo "  Installing uv..."
     curl -LsSf https://astral.sh/uv/install.sh | sh
     export PATH="${HOME}/.local/bin:${PATH}"
@@ -223,8 +269,18 @@ exec uv run --script "$HOME/.local/share/vault-search/vs.py" "$@"
 WRAPPER
 chmod +x "${BIN_DIR}/vs"
 
-# Save config (use Python for proper JSON escaping of special characters)
-VAULT_PATH="$VAULT_PATH" python3 -c "import json, os; print(json.dumps({'vault_path': os.environ['VAULT_PATH']}))" > "${DATA_DIR}/config.json"
+# Save config (preserve existing settings, update vault_path)
+VAULT_PATH="$VAULT_PATH" CONFIG_FILE="${DATA_DIR}/config.json" python3 -c "
+import json, os
+config_file = os.environ['CONFIG_FILE']
+try:
+    with open(config_file) as f:
+        config = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    config = {}
+config['vault_path'] = os.environ['VAULT_PATH']
+print(json.dumps(config))
+" > "${DATA_DIR}/config.json.tmp" && mv "${DATA_DIR}/config.json.tmp" "${DATA_DIR}/config.json"
 
 echo "  ✓ Installed to ${BIN_DIR}/vs"
 
@@ -253,19 +309,44 @@ elif [[ -d "${LOCAL_REPO}/integrations" ]]; then
     printf "  Install Claude Code skill? [y/N] "
     read -r INSTALL_CLAUDE </dev/tty
     if [[ "$INSTALL_CLAUDE" =~ ^[Yy]$ ]]; then
-        PLUGIN_DIR="${VAULT_PATH}/.claude-plugin"
-        SKILLS_DIR="${PLUGIN_DIR}/skills/vault-search"
-        mkdir -p "${SKILLS_DIR}"
+        echo "  Where to install?"
+        echo "    [g] Global (~/.claude/plugins/) - available everywhere"
+        echo "    [p] Project (${VAULT_PATH}/.claude/plugins/) - this vault only"
+        printf "  Choice [g/p]: "
+        read -r CLAUDE_LOCATION </dev/tty
+        case "$CLAUDE_LOCATION" in
+            [Pp])
+                PLUGIN_DIR="${VAULT_PATH}/.claude/plugins/vault-search"
+                ;;
+            *)
+                PLUGIN_DIR="${HOME}/.claude/plugins/vault-search"
+                ;;
+        esac
+        mkdir -p "${PLUGIN_DIR}"
         cp "${LOCAL_REPO}/integrations/claude/plugin.json" "${PLUGIN_DIR}/plugin.json"
-        cp "${LOCAL_REPO}/integrations/claude/SKILL.md" "${SKILLS_DIR}/SKILL.md"
-        echo "  ✓ Claude skill installed"
+        cp "${LOCAL_REPO}/integrations/claude/SKILL.md" "${PLUGIN_DIR}/SKILL.md"
+        echo "  ✓ Claude skill installed to ${PLUGIN_DIR}"
     fi
 
     printf "  Install OpenAI Codex AGENTS.md? [y/N] "
     read -r INSTALL_CODEX </dev/tty
     if [[ "$INSTALL_CODEX" =~ ^[Yy]$ ]]; then
-        cp "${LOCAL_REPO}/integrations/codex/AGENTS.md" "${VAULT_PATH}/AGENTS.md"
-        echo "  ✓ AGENTS.md installed"
+        if [[ -f "${VAULT_PATH}/AGENTS.md" ]]; then
+            echo "  ⚠ AGENTS.md already exists at ${VAULT_PATH}/AGENTS.md"
+            printf "  Append vault-search instructions? [y/N] "
+            read -r APPEND_AGENTS </dev/tty
+            if [[ "$APPEND_AGENTS" =~ ^[Yy]$ ]]; then
+                echo "" >> "${VAULT_PATH}/AGENTS.md"
+                echo "<!-- vault-search integration -->" >> "${VAULT_PATH}/AGENTS.md"
+                cat "${LOCAL_REPO}/integrations/codex/AGENTS.md" >> "${VAULT_PATH}/AGENTS.md"
+                echo "  ✓ Appended to AGENTS.md"
+            else
+                echo "  Skipped (file not modified)"
+            fi
+        else
+            cp "${LOCAL_REPO}/integrations/codex/AGENTS.md" "${VAULT_PATH}/AGENTS.md"
+            echo "  ✓ AGENTS.md installed"
+        fi
     fi
     echo ""
 else
@@ -275,25 +356,52 @@ else
     printf "  Install Claude Code skill? [y/N] "
     read -r INSTALL_CLAUDE </dev/tty
     if [[ "$INSTALL_CLAUDE" =~ ^[Yy]$ ]]; then
-        PLUGIN_DIR="${VAULT_PATH}/.claude-plugin"
-        SKILLS_DIR="${PLUGIN_DIR}/skills/vault-search"
-        mkdir -p "${SKILLS_DIR}"
+        echo "  Where to install?"
+        echo "    [g] Global (~/.claude/plugins/) - available everywhere"
+        echo "    [p] Project (${VAULT_PATH}/.claude/plugins/) - this vault only"
+        printf "  Choice [g/p]: "
+        read -r CLAUDE_LOCATION </dev/tty
+        case "$CLAUDE_LOCATION" in
+            [Pp])
+                PLUGIN_DIR="${VAULT_PATH}/.claude/plugins/vault-search"
+                ;;
+            *)
+                PLUGIN_DIR="${HOME}/.claude/plugins/vault-search"
+                ;;
+        esac
+        mkdir -p "${PLUGIN_DIR}"
         if curl -sSLf "${REPO_URL}/integrations/claude/plugin.json" -o "${PLUGIN_DIR}/plugin.json" && \
-           curl -sSLf "${REPO_URL}/integrations/claude/SKILL.md" -o "${SKILLS_DIR}/SKILL.md"; then
-            echo "  ✓ Claude skill installed"
+           curl -sSLf "${REPO_URL}/integrations/claude/SKILL.md" -o "${PLUGIN_DIR}/SKILL.md"; then
+            echo "  ✓ Claude skill installed to ${PLUGIN_DIR}"
         else
             echo "  ✗ Failed to download Claude skill files"
-            rm -rf "${PLUGIN_DIR}"
+            # Only remove files we tried to create, not the whole directory
+            rm -f "${PLUGIN_DIR}/plugin.json" "${PLUGIN_DIR}/SKILL.md" 2>/dev/null
+            rmdir "${PLUGIN_DIR}" 2>/dev/null || true
         fi
     fi
 
     printf "  Install OpenAI Codex AGENTS.md? [y/N] "
     read -r INSTALL_CODEX </dev/tty
     if [[ "$INSTALL_CODEX" =~ ^[Yy]$ ]]; then
-        if curl -sSLf "${REPO_URL}/integrations/codex/AGENTS.md" -o "${VAULT_PATH}/AGENTS.md"; then
-            echo "  ✓ AGENTS.md installed"
+        if [[ -f "${VAULT_PATH}/AGENTS.md" ]]; then
+            echo "  ⚠ AGENTS.md already exists at ${VAULT_PATH}/AGENTS.md"
+            printf "  Append vault-search instructions? [y/N] "
+            read -r APPEND_AGENTS </dev/tty
+            if [[ "$APPEND_AGENTS" =~ ^[Yy]$ ]]; then
+                echo "" >> "${VAULT_PATH}/AGENTS.md"
+                echo "<!-- vault-search integration -->" >> "${VAULT_PATH}/AGENTS.md"
+                curl -sSLf "${REPO_URL}/integrations/codex/AGENTS.md" >> "${VAULT_PATH}/AGENTS.md"
+                echo "  ✓ Appended to AGENTS.md"
+            else
+                echo "  Skipped (file not modified)"
+            fi
         else
-            echo "  ✗ Failed to download AGENTS.md"
+            if curl -sSLf "${REPO_URL}/integrations/codex/AGENTS.md" -o "${VAULT_PATH}/AGENTS.md"; then
+                echo "  ✓ AGENTS.md installed"
+            else
+                echo "  ✗ Failed to download AGENTS.md"
+            fi
         fi
     fi
     echo ""
@@ -326,9 +434,16 @@ else
 
     echo ""
 
-    # Enable autostart (includes auto-restart on failure)
-    uv run --script "${VS_SCRIPT}" autostart --enable
-    sleep 2
+    # Ask about autostart
+    echo "  The daemon keeps models in memory for fast searches (~100ms vs ~5s)."
+    printf "  Enable daemon autostart on login? [y/N] "
+    read -r ENABLE_AUTOSTART </dev/tty
+    if [[ "$ENABLE_AUTOSTART" =~ ^[Yy]$ ]]; then
+        uv run --script "${VS_SCRIPT}" autostart --enable
+        sleep 2
+    else
+        echo "  Skipped. Run 'vs serve' manually when needed, or 'vs autostart --enable' later."
+    fi
 fi
 
 # Verify

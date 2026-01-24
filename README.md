@@ -21,12 +21,12 @@ curl -sSL https://raw.githubusercontent.com/wuhup/vault-search/main/scripts/setu
 ```
 
 The setup wizard will:
-1. Install [uv](https://github.com/astral-sh/uv) if needed
+1. Install [uv](https://github.com/astral-sh/uv) (with your permission)
 2. Configure your document path
 3. Install `vs` to `~/.local/bin`
 4. Optionally install AI integrations (Claude, Codex)
 5. Download models (~500MB) and build index
-6. Enable autostart with auto-restart on failure
+6. Optionally enable daemon autostart
 
 ### From Cloned Repo
 
@@ -122,11 +122,14 @@ The `vs` command works standalone, but you can install optional AI integrations 
 
 ### Claude Code
 
-Answer "y" to "Install Claude Code skill?" during setup. This installs to your vault:
+Answer "y" to "Install Claude Code skill?" during setup. You can choose:
+- **Global** (`~/.claude/plugins/vault-search/`) - works in any project
+- **Project** (`your-vault/.claude/plugins/vault-search/`) - this vault only
+
 ```
-your-vault/.claude-plugin/
+~/.claude/plugins/vault-search/   # or .claude/plugins/vault-search/ in project
 ├── plugin.json
-└── skills/vault-search/SKILL.md
+└── SKILL.md
 ```
 
 Then Claude can search your vault when you ask:
@@ -147,10 +150,10 @@ Combines BM25 keyword matching with semantic embeddings for best results.
 - **Reranker**: `cross-encoder/ms-marco-MiniLM-L-6-v2` (quality reranking)
 
 ### Daemon Mode
-Setup automatically enables the daemon with auto-restart:
+The daemon keeps models in memory for fast searches:
 - **Fast searches**: ~100ms vs ~5s cold start
 - **Auto-updates**: Index refreshes every 60s
-- **Auto-restart**: Daemon restarts on crash or reboot
+- **Auto-restart**: When enabled, daemon restarts on crash or reboot
 
 ## Configuration
 
