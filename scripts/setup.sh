@@ -209,6 +209,13 @@ else
 fi
 chmod +x "${VS_SCRIPT}"
 
+# Clear stale uv cache to ensure fresh dependencies after updates
+# This prevents issues when dependency versions change (e.g., txtai upgrades)
+UV_CACHE_DIR="${HOME}/.cache/uv/environments-v2"
+if [[ -d "${UV_CACHE_DIR}" ]]; then
+    rm -rf "${UV_CACHE_DIR}"/vs-* 2>/dev/null && echo "  ✓ Cleared stale dependency cache"
+fi
+
 # Create wrapper
 cat > "${BIN_DIR}/vs" << 'WRAPPER'
 #!/usr/bin/env bash
