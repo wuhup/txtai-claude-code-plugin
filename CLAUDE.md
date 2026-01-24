@@ -50,8 +50,10 @@ vs/
 │
 ├── integrations/
 │   ├── claude/
-│   │   ├── SKILL.md             # Claude Code skill
-│   │   └── plugin.json          # Minimal plugin manifest
+│   │   ├── plugin.json          # Plugin manifest
+│   │   └── skills/
+│   │       └── search/
+│   │           └── SKILL.md     # Claude Code skill
 │   └── codex/
 │       └── AGENTS.md            # OpenAI Codex instructions
 │
@@ -72,7 +74,9 @@ vs/
 # Optional AI integrations (user chooses location during setup):
 ~/.claude/plugins/vault-search/  # Global - or project's .claude/plugins/
   plugin.json
-  SKILL.md
+  skills/
+    search/
+      SKILL.md
 ```
 
 ### Search Pipeline

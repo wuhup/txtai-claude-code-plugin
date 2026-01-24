@@ -322,9 +322,9 @@ elif [[ -d "${LOCAL_REPO}/integrations" ]]; then
                 PLUGIN_DIR="${HOME}/.claude/plugins/vault-search"
                 ;;
         esac
-        mkdir -p "${PLUGIN_DIR}"
+        mkdir -p "${PLUGIN_DIR}/skills/search"
         cp "${LOCAL_REPO}/integrations/claude/plugin.json" "${PLUGIN_DIR}/plugin.json"
-        cp "${LOCAL_REPO}/integrations/claude/SKILL.md" "${PLUGIN_DIR}/SKILL.md"
+        cp "${LOCAL_REPO}/integrations/claude/skills/search/SKILL.md" "${PLUGIN_DIR}/skills/search/SKILL.md"
         echo "  ✓ Claude skill installed to ${PLUGIN_DIR}"
     fi
 
@@ -369,15 +369,13 @@ else
                 PLUGIN_DIR="${HOME}/.claude/plugins/vault-search"
                 ;;
         esac
-        mkdir -p "${PLUGIN_DIR}"
+        mkdir -p "${PLUGIN_DIR}/skills/search"
         if curl -sSLf "${REPO_URL}/integrations/claude/plugin.json" -o "${PLUGIN_DIR}/plugin.json" && \
-           curl -sSLf "${REPO_URL}/integrations/claude/SKILL.md" -o "${PLUGIN_DIR}/SKILL.md"; then
+           curl -sSLf "${REPO_URL}/integrations/claude/skills/search/SKILL.md" -o "${PLUGIN_DIR}/skills/search/SKILL.md"; then
             echo "  ✓ Claude skill installed to ${PLUGIN_DIR}"
         else
             echo "  ✗ Failed to download Claude skill files"
-            # Only remove files we tried to create, not the whole directory
-            rm -f "${PLUGIN_DIR}/plugin.json" "${PLUGIN_DIR}/SKILL.md" 2>/dev/null
-            rmdir "${PLUGIN_DIR}" 2>/dev/null || true
+            rm -rf "${PLUGIN_DIR}" 2>/dev/null || true
         fi
     fi
 
