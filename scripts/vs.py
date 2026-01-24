@@ -2,10 +2,9 @@
 # /// script
 # requires-python = ">=3.10,<3.13"
 # dependencies = [
-#     "txtai",
-#     "sentence-transformers",
-#     "httpx",
-#     "torch>=2.0,<2.11",
+#     "txtai[pipeline]>=8.0.0,<9",
+#     "sentence-transformers>=3.0.0,<4",
+#     "torch>=2.0.0,<3",
 # ]
 # ///
 """
@@ -363,16 +362,20 @@ def do_search(query: str, limit: int, rerank: bool, embeddings, reranker, min_sc
     if rerank and len(results) > 1 and reranker:
         texts = [r.get("text", "")[:1000] if isinstance(r, dict) else "" for r in results]
         raw_scores = reranker(query, texts)
-        # CrossEncoder returns [(index, score), ...] tuples - extract score (second element)
-        scores = [s[1] if isinstance(s, (tuple, list)) else s for s in raw_scores]
-        ranked = sorted(zip(results, scores), key=lambda x: x[1], reverse=True)
-        results = [r for r, s in ranked[:limit]]
-        # Update scores with reranker scores
-        for i, (r, s) in enumerate(ranked[:limit]):
-            if isinstance(r, dict):
-                r["score"] = float(s)
-    else:
-        results = results[:limit]
+        # CrossEncoder returns [(index, score), ...] tuples sorted by score
+        # Build mapping from original index to reranker score
+        score_map = {}
+        for item in raw_scores:
+            if isinstance(item, (tuple, list)) and len(item) >= 2:
+                score_map[int(item[0])] = float(item[1])
+        # Apply reranker scores to results
+        for i, r in enumerate(results):
+            if isinstance(r, dict) and i in score_map:
+                r["score"] = score_map[i]
+        # Sort by reranker score and limit
+        results = sorted(results, key=lambda r: r.get("score", 0) if isinstance(r, dict) else 0, reverse=True)
+
+    results = results[:limit]
 
     # Apply min_score filter
     if min_score is not None:
