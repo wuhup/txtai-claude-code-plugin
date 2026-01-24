@@ -332,6 +332,9 @@ else
     echo "  ⚠ Verification returned unexpected output"
 fi
 
+# Mark setup complete for status reporting
+touch "${DATA_DIR}/.setup-complete"
+
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 if [[ "$UPDATE_MODE" == true ]]; then
