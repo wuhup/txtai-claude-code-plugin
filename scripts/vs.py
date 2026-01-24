@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.10,<3.13"
 # dependencies = [
-#     "txtai[pipeline]>=8.0.0,<9",
+#     "txtai[pipeline]>=9.4.1",
 #     "sentence-transformers>=3.0.0,<4",
 #     "torch>=2.0.0,<3",
 # ]
@@ -353,33 +353,39 @@ def build_index(incremental: bool = False, embeddings=None, quiet: bool = False)
 
 def do_search(query: str, limit: int, rerank: bool, embeddings, reranker, min_score: float | None = None) -> list:
     """Perform search with pre-loaded models."""
-    search_limit = limit * 2 if rerank else limit
+    # Fetch extra results to account for filtering empty-text documents
+    search_limit = max(limit * 5, 50) if rerank else max(limit * 3, 30)
     results = embeddings.search(query, limit=search_limit)
 
     if not results:
         return []
 
+    # Filter out results with no text content (empty files are not useful)
+    results = [r for r in results if isinstance(r, dict) and r.get("text", "").strip()]
+
+    if not results:
+        return []
+
     if rerank and len(results) > 1 and reranker:
-        texts = [r.get("text", "")[:1000] if isinstance(r, dict) else "" for r in results]
+        texts = [r.get("text", "")[:1000] for r in results]
         raw_scores = reranker(query, texts)
         # CrossEncoder returns [(index, score), ...] tuples sorted by score
-        # Build mapping from original index to reranker score
         score_map = {}
         for item in raw_scores:
             if isinstance(item, (tuple, list)) and len(item) >= 2:
                 score_map[int(item[0])] = float(item[1])
         # Apply reranker scores to results
         for i, r in enumerate(results):
-            if isinstance(r, dict) and i in score_map:
+            if i in score_map:
                 r["score"] = score_map[i]
-        # Sort by reranker score and limit
-        results = sorted(results, key=lambda r: r.get("score", 0) if isinstance(r, dict) else 0, reverse=True)
+        # Sort by reranker score
+        results = sorted(results, key=lambda r: r.get("score", 0), reverse=True)
 
     results = results[:limit]
 
     # Apply min_score filter
     if min_score is not None:
-        results = [r for r in results if (r.get("score", 0) if isinstance(r, dict) else 0) >= min_score]
+        results = [r for r in results if r.get("score", 0) >= min_score]
 
     return results
 
