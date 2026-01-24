@@ -307,10 +307,12 @@ def build_index(incremental: bool = False, embeddings=None, quiet: bool = False)
     # Detect deleted files
     deleted = set(old_metadata.keys()) - current_files if incremental else set()
 
+    embeddings_path = INDEX_DIR / "embeddings"
     if incremental and not documents and not deleted:
-        if not quiet:
-            print("  No changes detected, index is up to date")
-        return {"changed": 0, "deleted": 0}
+        if embeddings_path.exists():
+            if not quiet:
+                print("  No changes detected, index is up to date")
+            return {"changed": 0, "deleted": 0}
 
     if not quiet:
         print(f"  Indexing {len(documents)} changed, {len(deleted)} deleted")
@@ -320,7 +322,6 @@ def build_index(incremental: bool = False, embeddings=None, quiet: bool = False)
     if not embeddings_provided:
         embeddings = create_embeddings()
 
-    embeddings_path = INDEX_DIR / "embeddings"
     if incremental and embeddings_path.exists():
         if not embeddings_provided:
             embeddings.load(str(embeddings_path))
@@ -459,6 +460,34 @@ def format_results_console(query: str, results: list) -> str:
 # Daemon mode
 # ─────────────────────────────────────────────────────────────
 
+def _get_pid_command(pid: int) -> str | None:
+    """Return process command line for a PID, or None if unavailable."""
+    try:
+        if platform.system() == "Darwin":
+            result = subprocess.run(
+                ["ps", "-p", str(pid), "-o", "command=", "-ww"],
+                capture_output=True,
+                text=True,
+            )
+        else:
+            result = subprocess.run(
+                ["ps", "-p", str(pid), "-o", "cmd=", "-ww"],
+                capture_output=True,
+                text=True,
+            )
+        if result.returncode != 0:
+            return None
+        cmd = result.stdout.strip()
+        return cmd or None
+    except Exception:
+        return None
+
+
+def _is_daemon_command(cmd: str) -> bool:
+    """Check if a command line looks like our daemon invocation."""
+    return "_daemon" in cmd and ("vs.py" in cmd or "vault-search" in cmd)
+
+
 def daemon_running() -> bool:
     """Check if daemon is running."""
     if not PID_FILE.exists():
@@ -466,11 +495,16 @@ def daemon_running() -> bool:
     try:
         pid = int(PID_FILE.read_text().strip())
         os.kill(pid, 0)  # Check if process exists
-        return True
     except (ProcessLookupError, ValueError):
         PID_FILE.unlink(missing_ok=True)
         SOCKET_PATH.unlink(missing_ok=True)
         return False
+    cmd = _get_pid_command(pid)
+    if cmd and not _is_daemon_command(cmd):
+        PID_FILE.unlink(missing_ok=True)
+        SOCKET_PATH.unlink(missing_ok=True)
+        return False
+    return True
 
 
 def get_daemon_pid() -> int | None:
@@ -672,23 +706,11 @@ def stop_daemon():
     pid = int(PID_FILE.read_text().strip())
 
     # Validate this is actually our daemon process before killing
-    try:
-        # Check if process command line contains our script
-        if platform.system() == "Darwin":
-            result = subprocess.run(["ps", "-p", str(pid), "-o", "command="],
-                                    capture_output=True, text=True)
-        else:
-            result = subprocess.run(["ps", "-p", str(pid), "-o", "cmd="],
-                                    capture_output=True, text=True)
-
-        cmd = result.stdout.strip()
-        if "vs.py" not in cmd and "vault-search" not in cmd:
-            print(f"PID {pid} is not a vault-search daemon (stale PID file)")
-            PID_FILE.unlink(missing_ok=True)
-            return
-    except Exception:
-        # If we can't verify, assume PID file is stale if process doesn't exist
-        pass
+    cmd = _get_pid_command(pid)
+    if cmd and not _is_daemon_command(cmd):
+        print(f"PID {pid} is not a vault-search daemon (stale PID file)")
+        PID_FILE.unlink(missing_ok=True)
+        return
 
     os.kill(pid, signal.SIGTERM)
     time.sleep(0.5)

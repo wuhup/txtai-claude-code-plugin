@@ -47,7 +47,6 @@ vs/
 ├── scripts/
 │   ├── vs.py                    # Core tool (universal)
 │   ├── setup.sh                 # Interactive setup wizard
-│   └── install.sh               # One-line installer for headless servers
 │
 ├── integrations/
 │   ├── claude/
@@ -84,7 +83,7 @@ vs/
 - Config: `~/.local/share/vault-search/config.json`
 - Index: `~/.local/share/vault-search/index/`
 - Socket: `~/.local/share/vault-search/.vault-search.sock`
-- Setup marker: `~/.local/share/vault-search/.setup-complete-v2`
+- Setup marker: `~/.local/share/vault-search/.setup-complete`
 
 ### Design Decisions
 - Single-file Python script using `uv run --script` with inline dependencies (no venv management)
