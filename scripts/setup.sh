@@ -78,11 +78,21 @@ if [[ "${1:-}" == "--uninstall" ]]; then
         echo "  ✓ Removed ~/.claude/plugins/vault-search"
     fi
 
+    # Remove vault-search section from global CLAUDE.md
+    CLAUDE_MD="${HOME}/.claude/CLAUDE.md"
+    if [[ -f "$CLAUDE_MD" ]] && grep -q "## Vault Search" "$CLAUDE_MD" 2>/dev/null; then
+        # Remove section from "## Vault Search" to next heading or EOF
+        awk '/^## Vault Search$/{skip=1; next} /^## /{skip=0} !skip' "$CLAUDE_MD" > "${CLAUDE_MD}.tmp"
+        mv "${CLAUDE_MD}.tmp" "$CLAUDE_MD"
+        echo "  ✓ Removed vault-search section from ~/.claude/CLAUDE.md"
+    fi
+
     echo ""
     echo "Uninstall complete."
     echo ""
-    echo "Note: Project-local installations (.claude/plugins/vault-search in your vault)"
-    echo "and AGENTS.md files are not removed. Delete them manually if needed."
+    echo "Note: Project-local installations (.claude/plugins/vault-search in your vault),"
+    echo "project CLAUDE.md sections, and AGENTS.md files are not removed."
+    echo "Delete them manually if needed."
     exit 0
 fi
 
@@ -326,6 +336,29 @@ elif [[ -d "${LOCAL_REPO}/integrations" ]]; then
         cp "${LOCAL_REPO}/integrations/claude/plugin.json" "${PLUGIN_DIR}/plugin.json"
         cp "${LOCAL_REPO}/integrations/claude/skills/search/SKILL.md" "${PLUGIN_DIR}/skills/search/SKILL.md"
         echo "  ✓ Claude skill installed to ${PLUGIN_DIR}"
+
+        # Append to corresponding CLAUDE.md
+        if [[ "$CLAUDE_LOCATION" =~ ^[Pp]$ ]]; then
+            CLAUDE_MD="${VAULT_PATH}/.claude/CLAUDE.md"
+        else
+            CLAUDE_MD="${HOME}/.claude/CLAUDE.md"
+        fi
+        mkdir -p "$(dirname "$CLAUDE_MD")"
+        if [[ -f "$CLAUDE_MD" ]] && grep -q "## Vault Search" "$CLAUDE_MD" 2>/dev/null; then
+            echo "  ✓ CLAUDE.md already has vault-search instructions"
+        else
+            cat >> "$CLAUDE_MD" << 'CLAUDEMD'
+
+## Vault Search
+For semantic search over the vault, use `vs` (augments Explore agent):
+```bash
+vs "query"              # find by meaning, not keywords
+vs "query" --json       # structured output for parsing
+vs "query" --fast       # skip reranking (~10x faster)
+```
+CLAUDEMD
+            echo "  ✓ Added vault-search instructions to ${CLAUDE_MD}"
+        fi
     fi
 
     printf "  Install OpenAI Codex AGENTS.md? [y/N] "
@@ -373,6 +406,29 @@ else
         if curl -sSLf "${REPO_URL}/integrations/claude/plugin.json" -o "${PLUGIN_DIR}/plugin.json" && \
            curl -sSLf "${REPO_URL}/integrations/claude/skills/search/SKILL.md" -o "${PLUGIN_DIR}/skills/search/SKILL.md"; then
             echo "  ✓ Claude skill installed to ${PLUGIN_DIR}"
+
+            # Append to corresponding CLAUDE.md
+            if [[ "$CLAUDE_LOCATION" =~ ^[Pp]$ ]]; then
+                CLAUDE_MD="${VAULT_PATH}/.claude/CLAUDE.md"
+            else
+                CLAUDE_MD="${HOME}/.claude/CLAUDE.md"
+            fi
+            mkdir -p "$(dirname "$CLAUDE_MD")"
+            if [[ -f "$CLAUDE_MD" ]] && grep -q "## Vault Search" "$CLAUDE_MD" 2>/dev/null; then
+                echo "  ✓ CLAUDE.md already has vault-search instructions"
+            else
+                cat >> "$CLAUDE_MD" << 'CLAUDEMD'
+
+## Vault Search
+For semantic search over the vault, use `vs` (augments Explore agent):
+```bash
+vs "query"              # find by meaning, not keywords
+vs "query" --json       # structured output for parsing
+vs "query" --fast       # skip reranking (~10x faster)
+```
+CLAUDEMD
+                echo "  ✓ Added vault-search instructions to ${CLAUDE_MD}"
+            fi
         else
             echo "  ✗ Failed to download Claude skill files"
             rm -rf "${PLUGIN_DIR}" 2>/dev/null || true

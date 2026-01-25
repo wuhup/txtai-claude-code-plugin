@@ -8,28 +8,31 @@
 # ]
 # ///
 """
-vs - Lightweight semantic search over document vaults.
+vs - Semantic search for document vaults (CPU-optimized, no GPU needed)
 
-Usage:
-    vs "query"                      Search (default action)
-    vs "query" --json               JSON output
-    vs "query" --files              Paths only
-    vs "query" --fast               Skip reranking (~5x faster)
-    vs "query" --min-score 0.5      Filter low-relevance results
-    vs index                        Build/rebuild the search index
-    vs update                       Update index with new/changed files
-    vs serve                        Start daemon (keeps models in memory)
-    vs stop                         Stop daemon
-    vs status                       Show index statistics and daemon state
-    vs config                       Show current configuration
-    vs config --vault PATH          Set vault path
+Find documents by meaning, not just keywords. Returns ranked results with
+file paths, scores (0-1), and text snippets.
 
-Environment:
-    VAULT_SEARCH_PATH    Path to vault (overrides config file)
+Search:
+    vs "query"                      Search (default)
+    vs "query" -n 10                More results (default: 5)
+    vs "query" --fast               Skip reranking (~10x faster)
+    vs "query" --min-score 0.5      Filter by relevance threshold
 
-Models:
-    Embeddings: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
-    Reranker: cross-encoder/ms-marco-MiniLM-L-6-v2 (daemon mode)
+Output formats:
+    (default)                       Human-readable with scores and snippets
+    --json                          {"query":..., "results":[{path, score, snippet}]}
+    --files                         Paths only, one per line (for pipelines)
+
+Management:
+    vs status                       Check index and daemon state
+    vs update                       Incremental index update
+    vs index                        Full rebuild
+    vs serve / vs stop              Daemon control
+
+Typical AI workflow:
+    1. vs "topic" --json            Find relevant files
+    2. Read top results             Use file paths from output
 """
 
 import argparse
@@ -1056,6 +1059,11 @@ SUBCOMMANDS = {"index", "update", "serve", "stop", "status", "autostart", "searc
 
 
 def main():
+    # Show full help if no arguments (agent-friendly priming)
+    if len(sys.argv) == 1:
+        print(__doc__.strip())
+        return
+
     # Preprocess args: if first non-flag arg isn't a subcommand, treat as search query
     # This enables `vs "query"` as shorthand for `vs search "query"`
     args_to_parse = sys.argv[1:]
