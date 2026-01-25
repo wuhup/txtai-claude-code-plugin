@@ -1,14 +1,15 @@
 # vs - Lightweight Semantic Search
 
-A universal command-line tool for semantic search over document vaults using [txtai](https://github.com/neuml/txtai) AI embeddings.
+A universal command-line tool for semantic search over document vaults using [txtai](https://github.com/neuml/txtai) AI embeddings. **Optimized for CPU-only systems** - no GPU required.
 
 **Find notes by meaning, not just keywords.**
 
 ## Features
 
+- **CPU-optimized** - runs on any machine without GPU, using lightweight models
 - **Semantic search** - finds documents by meaning, not just keyword matching
 - **Hybrid search** - combines BM25 keywords + neural embeddings
-- **Daemon mode** - keeps models in memory for ~100ms searches
+- **Daemon mode** - keeps models in memory for fast searches (~1s with `--fast`)
 - **Multiple output formats** - human-readable, JSON, or file paths only
 - **Optional AI integrations** - Claude Code, OpenAI Codex, etc.
 
@@ -129,7 +130,9 @@ Answer "y" to "Install Claude Code skill?" during setup. You can choose:
 ```
 ~/.claude/plugins/vault-search/   # or .claude/plugins/vault-search/ in project
 ├── plugin.json
-└── SKILL.md
+└── skills/
+    └── search/
+        └── SKILL.md
 ```
 
 Then Claude can search your vault when you ask:
@@ -145,13 +148,15 @@ Answer "y" to "Install OpenAI Codex AGENTS.md?" during setup. This installs `AGE
 ### Hybrid Search
 Combines BM25 keyword matching with semantic embeddings for best results.
 
-### Models Used
+### Models Used (CPU-optimized)
 - **Embeddings**: `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` (118M params, multilingual)
-- **Reranker**: `cross-encoder/ms-marco-MiniLM-L-6-v2` (quality reranking)
+- **Reranker**: `cross-encoder/ms-marco-MiniLM-L-2-v2` (2-layer model for fast CPU inference)
 
 ### Daemon Mode
 The daemon keeps models in memory for fast searches:
-- **Fast searches**: ~100ms vs ~5s cold start
+- **With `--fast`**: ~1s (no reranking)
+- **With reranking**: ~10-15s (cross-encoder on CPU)
+- **Cold start**: ~5s model loading
 - **Auto-updates**: Index refreshes every 60s
 - **Auto-restart**: When enabled, daemon restarts on crash or reboot
 
@@ -215,8 +220,10 @@ vs/
 │
 ├── integrations/
 │   ├── claude/
-│   │   ├── SKILL.md             # Claude Code skill
-│   │   └── plugin.json          # Plugin manifest
+│   │   ├── plugin.json          # Plugin manifest
+│   │   └── skills/
+│   │       └── search/
+│   │           └── SKILL.md     # Claude Code skill
 │   └── codex/
 │       └── AGENTS.md            # OpenAI Codex instructions
 │
