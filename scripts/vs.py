@@ -76,7 +76,7 @@ EXCLUDE_PATTERNS = {
 
 # Model configuration (multilingual, lightweight)
 EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-2-v2"
 
 
 def ensure_secure_dir(path: Path):
@@ -208,6 +208,10 @@ def extract_document(filepath: Path, vault_root: Path, quiet: bool = False) -> d
     except Exception as e:
         if not quiet:
             print(f"  Warning: Could not read {filepath}: {e}", file=sys.stderr)
+        return None
+
+    # Skip empty files - they pollute search results
+    if not content.strip():
         return None
 
     rel_path = filepath.relative_to(vault_root)
@@ -353,8 +357,8 @@ def build_index(incremental: bool = False, embeddings=None, quiet: bool = False)
 
 def do_search(query: str, limit: int, rerank: bool, embeddings, reranker, min_score: float | None = None) -> list:
     """Perform search with pre-loaded models."""
-    # Fetch extra results to account for filtering empty-text documents
-    search_limit = max(limit * 5, 50) if rerank else max(limit * 3, 30)
+    # Fetch extra results for reranking to find best matches
+    search_limit = max(limit * 3, 25) if rerank else limit
     results = embeddings.search(query, limit=search_limit)
 
     if not results:
