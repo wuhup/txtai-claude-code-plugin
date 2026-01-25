@@ -15,7 +15,7 @@ file paths, scores (0-1), and text snippets.
 
 Search:
     vs "query"                      Search (default)
-    vs "query" -n 10                More results (default: 5)
+    vs "query" -n 20                More results (default: 15)
     vs "query" --fast               Skip reranking (~10x faster)
     vs "query" --min-score 0.5      Filter by relevance threshold
 
@@ -27,6 +27,7 @@ Output formats:
 Management:
     vs status                       Check index and daemon state
     vs update                       Incremental index update
+    vs update --integrations        Also update AI integrations
     vs index                        Full rebuild
     vs serve / vs stop              Daemon control
 
@@ -65,6 +66,7 @@ SOCKET_PATH = DATA_DIR / ".vault-search.sock"
 PID_FILE = DATA_DIR / ".vault-search.pid"
 LOCK_FILE = DATA_DIR / ".vault-search.lock"
 SETUP_MARKER = DATA_DIR / ".setup-complete"
+REPO_RAW_URL = "https://raw.githubusercontent.com/wuhup/vault-search/main"
 
 # Files/directories to exclude from indexing
 EXCLUDE_PATTERNS = {
@@ -649,7 +651,7 @@ def run_daemon():
             if req.get("cmd") == "search":
                 results = do_search(
                     req["query"],
-                    req.get("limit", 5),
+                    req.get("limit", 15),
                     req.get("rerank", True),
                     embeddings,
                     reranker,
@@ -793,7 +795,7 @@ def status_via_daemon() -> dict | None:
         return None
 
 
-def search(query: str, limit: int = 5, rerank: bool = True, min_score: float | None = None,
+def search(query: str, limit: int = 15, rerank: bool = True, min_score: float | None = None,
            output_json: bool = False, output_files: bool = False, quiet: bool = False, verbose: bool = False):
     """Search the vault, using daemon if available."""
     embeddings_path = INDEX_DIR / "embeddings"
@@ -920,6 +922,75 @@ def set_vault_path(path: str):
     config["vault_path"] = str(resolved)
     save_config(config)
     print(f"Vault path set to: {resolved}")
+
+
+def update_integrations():
+    """Update installed AI integrations from repo or GitHub."""
+    import urllib.request
+
+    vault = get_vault_path()
+
+    # Find source: local repo clone or download from GitHub
+    script_path = Path(__file__).resolve()
+    repo_root = script_path.parent.parent  # scripts/vs.py -> repo root
+    local_integrations = repo_root / "integrations"
+    use_local = local_integrations.exists()
+
+    def get_file_content(rel_path: str) -> str | None:
+        """Get file content from local repo or GitHub."""
+        if use_local:
+            local_file = repo_root / rel_path
+            if local_file.exists():
+                return local_file.read_text()
+            return None
+        else:
+            url = f"{REPO_RAW_URL}/{rel_path}"
+            try:
+                with urllib.request.urlopen(url, timeout=10) as resp:
+                    return resp.read().decode()
+            except Exception:
+                return None
+
+    updated = []
+
+    # Update Claude plugin (check both global and project-local)
+    claude_locations = [Path.home() / ".claude" / "plugins" / "vault-search"]
+    if vault:
+        claude_locations.append(vault / ".claude" / "plugins" / "vault-search")
+
+    for plugin_dir in claude_locations:
+        if plugin_dir.exists():
+            # Update plugin.json
+            content = get_file_content("integrations/claude/plugin.json")
+            if content:
+                (plugin_dir / "plugin.json").write_text(content)
+
+            # Update SKILL.md
+            skill_dir = plugin_dir / "skills" / "search"
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            content = get_file_content("integrations/claude/skills/search/SKILL.md")
+            if content:
+                (skill_dir / "SKILL.md").write_text(content)
+
+            updated.append(f"Claude plugin: {plugin_dir}")
+
+    # Update Codex AGENTS.md (only if it exists in vault)
+    if vault:
+        agents_file = vault / "AGENTS.md"
+        if agents_file.exists():
+            content = get_file_content("integrations/codex/AGENTS.md")
+            if content:
+                agents_file.write_text(content)
+                updated.append(f"Codex: {agents_file}")
+
+    if updated:
+        source = "local repo" if use_local else "GitHub"
+        print(f"Updated integrations (from {source}):")
+        for item in updated:
+            print(f"  ✓ {item}")
+    else:
+        print("No integrations found to update.")
+        print("  (Run setup.sh to install integrations)")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1089,7 +1160,9 @@ def main():
 
     # Index commands
     subparsers.add_parser("index", help="Build/rebuild the full search index")
-    subparsers.add_parser("update", help="Update index with new/changed files")
+    update_parser = subparsers.add_parser("update", help="Update index with new/changed files")
+    update_parser.add_argument("--integrations", action="store_true",
+                               help="Also update AI integrations (Claude plugin, Codex AGENTS.md)")
 
     # Daemon commands
     subparsers.add_parser("serve", help="Start daemon (keeps models in memory)")
@@ -1108,7 +1181,7 @@ def main():
     # Search command (both explicit `vs search "query"` and implicit `vs "query"`)
     search_parser = subparsers.add_parser("search", help="Search the vault")
     search_parser.add_argument("query", help="Search query")
-    search_parser.add_argument("-n", "--limit", type=int, default=5, help="Number of results")
+    search_parser.add_argument("-n", "--limit", type=int, default=15, help="Number of results")
     search_parser.add_argument("--json", action="store_true", help="JSON output")
     search_parser.add_argument("--files", action="store_true", help="Paths only, one per line")
     search_parser.add_argument("--min-score", type=float, help="Minimum relevance score (0.0-1.0)")
@@ -1144,6 +1217,10 @@ def main():
             stop_daemon()
 
         build_index(incremental=True)
+
+        if args.integrations:
+            print()
+            update_integrations()
 
         if was_running:
             print("Restarting daemon...")

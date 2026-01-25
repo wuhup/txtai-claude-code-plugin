@@ -29,6 +29,7 @@ vs "query" --min-score 0.5         # Filter low-relevance results
 # Management
 vs status                          # Index stats + daemon state
 vs update                          # Incremental update
+vs update --integrations           # Also update Claude/Codex integrations
 vs index                           # Full rebuild of search index
 vs serve                           # Start daemon
 vs stop                            # Stop daemon
